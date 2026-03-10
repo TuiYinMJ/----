@@ -43,13 +43,13 @@
         `;
     }
 
-    function drawLineChart(canvas, points, color) {
+    function drawMultiLineChart(canvas, series, labels) {
         const ctx = canvas.getContext("2d");
         const { width, height } = canvas;
+        const padding = 48;
+        const min = 35;
+        const max = 95;
         ctx.clearRect(0, 0, width, height);
-        const padding = 40;
-        const max = Math.max(...points.map((item) => item.value), 100);
-        const min = Math.min(...points.map((item) => item.value), 0);
         ctx.strokeStyle = "rgba(89,58,28,0.15)";
         ctx.lineWidth = 1;
         for (let i = 0; i < 5; i++) {
@@ -59,28 +59,46 @@
             ctx.lineTo(width - padding, y);
             ctx.stroke();
         }
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        points.forEach((point, idx) => {
-            const x = padding + ((width - padding * 2) / Math.max(points.length - 1, 1)) * idx;
-            const y = height - padding - ((point.value - min) / Math.max(max - min, 1)) * (height - padding * 2);
-            if (idx === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-        });
-        ctx.stroke();
-        points.forEach((point, idx) => {
-            const x = padding + ((width - padding * 2) / Math.max(points.length - 1, 1)) * idx;
-            const y = height - padding - ((point.value - min) / Math.max(max - min, 1)) * (height - padding * 2);
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.arc(x, y, 5, 0, Math.PI * 2);
-            ctx.fill();
+        labels.forEach((label, index) => {
+            const x = padding + ((width - padding * 2) / Math.max(labels.length - 1, 1)) * index;
             ctx.fillStyle = "#78624b";
             ctx.font = "12px sans-serif";
-            ctx.fillText(String(point.label), x - 12, height - 12);
-            ctx.fillText(String(point.value), x - 10, y - 10);
+            ctx.fillText(String(label), x - 14, height - 12);
         });
+        series.forEach((line) => {
+            ctx.strokeStyle = line.color;
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            line.values.forEach((value, index) => {
+                const x = padding + ((width - padding * 2) / Math.max(line.values.length - 1, 1)) * index;
+                const y = height - padding - ((value - min) / (max - min)) * (height - padding * 2);
+                if (index === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+            line.values.forEach((value, index) => {
+                const x = padding + ((width - padding * 2) / Math.max(line.values.length - 1, 1)) * index;
+                const y = height - padding - ((value - min) / (max - min)) * (height - padding * 2);
+                ctx.fillStyle = line.color;
+                ctx.beginPath();
+                ctx.arc(x, y, 4, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        });
+        let legendX = padding;
+        const legendY = 20;
+        series.forEach((line) => {
+            ctx.fillStyle = line.color;
+            ctx.fillRect(legendX, legendY, 12, 12);
+            ctx.fillStyle = "#2f2418";
+            ctx.font = "12px sans-serif";
+            ctx.fillText(line.name, legendX + 18, legendY + 11);
+            legendX += 90;
+        });
+    }
+
+    function drawLineChart(canvas, points, color) {
+        drawMultiLineChart(canvas, [{ name: "综合", color, values: points.map((item) => item.value) }], points.map((item) => item.label));
     }
 
     function drawBarChart(canvas, items) {
@@ -107,6 +125,7 @@
     window.ChartRenderer = {
         renderRadar,
         drawLineChart,
+        drawMultiLineChart,
         drawBarChart
     };
 })();
