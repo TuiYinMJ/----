@@ -63,11 +63,27 @@
                                     <label for="birth-day">出生日期</label>
                                     <select id="birth-day"></select>
                                 </div>
+                                <div class="form-group">
+                                    <label for="birth-time">出生时间</label>
+                                    <input id="birth-time" type="time" value="09:30">
+                                </div>
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label for="birth-hour">出生时辰</label>
-                                    <select id="birth-hour"></select>
+                                    <label for="birth-region">常用出生地</label>
+                                    <select id="birth-region"></select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="birth-longitude">经度（东经）</label>
+                                    <input id="birth-longitude" type="number" step="0.01" min="70" max="140" value="121.47">
+                                </div>
+                                <div class="form-group">
+                                    <label for="solar-time-mode">时刻采用方式</label>
+                                    <select id="solar-time-mode">
+                                        <option value="auto">自动判断</option>
+                                        <option value="standard">标准时间</option>
+                                        <option value="trueSolar">真太阳时</option>
+                                    </select>
                                 </div>
                                 <div class="form-group">
                                     <label for="gender">性别</label>
@@ -76,16 +92,25 @@
                                         <option value="female">女</option>
                                     </select>
                                 </div>
+                            </div>
+                            <div class="form-row">
                                 <div class="form-group">
-                                    <label for="calendar-type">历法类型</label>
-                                    <select id="calendar-type">
-                                        <option value="solar">公历</option>
-                                        <option value="lunar">农历（演示版暂按提示换算后录入公历）</option>
+                                    <label for="timezone-offset">时区</label>
+                                    <select id="timezone-offset">
+                                        <option value="8" selected>UTC+8（中国标准时间）</option>
+                                        <option value="9">UTC+9</option>
+                                        <option value="7">UTC+7</option>
+                                        <option value="0">UTC+0</option>
+                                        <option value="-5">UTC-5</option>
                                     </select>
                                 </div>
                                 <div class="form-group">
                                     <label for="target-year">分析基准年</label>
                                     <select id="target-year"></select>
+                                </div>
+                                <div class="form-group form-group-wide">
+                                    <label>公历/农历与真太阳时预览</label>
+                                    <div id="datetime-preview" class="preview-panel"></div>
                                 </div>
                             </div>
                             <div class="form-actions">
@@ -102,7 +127,8 @@
                             <li>离线运行，数据仅保存在浏览器本地 `localStorage`。</li>
                             <li>支持八字四柱、五行权重、十神、神煞、大运、流年、流月和健康倾向分析。</li>
                             <li>健康预测属于命理启发式推演，不替代医学判断。</li>
-                            <li>农历输入暂为过渡选项，当前版本建议先换算公历再录入以获得更稳定结果。</li>
+                            <li>默认按公历录入，并实时显示对应农历；便于普通用户直接填写身份证/医院记录时间。</li>
+                            <li>真太阳时和地区有关，系统会按经度、时区与均时差自动判断是否需要接管排盘时间。</li>
                             <li>后续可继续接入更精确节气表、历法库、知识库或私有模型。</li>
                         </ul>
 
@@ -118,6 +144,10 @@
             </section>
 
             <section id="section-bazi" class="section">
+                <div class="card">
+                    <h2>排盘依据</h2>
+                    <div id="calculation-meta" class="pair-grid"></div>
+                </div>
                 <div class="grid-2">
                     <div class="card bazi-pillars-card">
                         <h2>八字四柱</h2>

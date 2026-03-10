@@ -5,15 +5,15 @@
         return (gender === "male" && isYang) || (gender === "female" && !isYang) ? 1 : -1;
     }
 
-    function getStartAge(monthBranchIndex, hourIndex) {
-        return 3 + ((monthBranchIndex + hourIndex) % 6);
+    function getStartAge(monthBranchIndex, shichenIndex) {
+        return 3 + ((monthBranchIndex + shichenIndex) % 6);
     }
 
     function buildDaYun(chart, targetYear) {
         const birthYear = chart.input.year;
         const monthPillar = chart.pillars[1];
         const direction = getDirection(chart.pillars[0].stem, chart.input.gender);
-        const startAge = getStartAge(BaziCore.BRANCHES.indexOf(monthPillar.branch), chart.input.hourIndex);
+        const startAge = getStartAge(BaziCore.BRANCHES.indexOf(monthPillar.branch), chart.solarMeta.effectiveShichen.index);
         const monthStemIndex = BaziCore.STEMS.indexOf(monthPillar.stem);
         const monthBranchIndex = BaziCore.BRANCHES.indexOf(monthPillar.branch);
         const dayun = Array.from({ length: 8 }, (_, i) => {

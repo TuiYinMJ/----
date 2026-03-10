@@ -1,5 +1,24 @@
 (function () {
-    const STORAGE_KEY = "tming-bazi-profiles-v1";
+    const STORAGE_KEY = "tming-bazi-profiles-v2";
+    const REGIONS = [
+        { name: "上海", longitude: 121.47, timezoneOffset: 8 },
+        { name: "北京", longitude: 116.41, timezoneOffset: 8 },
+        { name: "广州", longitude: 113.26, timezoneOffset: 8 },
+        { name: "深圳", longitude: 114.05, timezoneOffset: 8 },
+        { name: "成都", longitude: 104.06, timezoneOffset: 8 },
+        { name: "重庆", longitude: 106.55, timezoneOffset: 8 },
+        { name: "西安", longitude: 108.94, timezoneOffset: 8 },
+        { name: "武汉", longitude: 114.31, timezoneOffset: 8 },
+        { name: "昆明", longitude: 102.83, timezoneOffset: 8 },
+        { name: "乌鲁木齐", longitude: 87.62, timezoneOffset: 8 },
+        { name: "拉萨", longitude: 91.13, timezoneOffset: 8 },
+        { name: "香港", longitude: 114.17, timezoneOffset: 8 },
+        { name: "台北", longitude: 121.56, timezoneOffset: 8 },
+        { name: "东京", longitude: 139.69, timezoneOffset: 9 },
+        { name: "新加坡", longitude: 103.82, timezoneOffset: 8 },
+        { name: "自定义", longitude: 120, timezoneOffset: 8 }
+    ];
+
     const state = { current: null };
 
     function initSelects() {
@@ -7,10 +26,7 @@
         fillSelect("target-year", 2020, 2045, new Date().getFullYear());
         fillSelect("birth-month", 1, 12, 6);
         fillSelect("birth-day", 1, 31, 18);
-        fillSelect("birth-hour", 0, 11, 5, (value) => {
-            const labels = ["子时", "丑时", "寅时", "卯时", "辰时", "巳时", "午时", "未时", "申时", "酉时", "戌时", "亥时"];
-            return labels[value];
-        });
+        initRegionSelect();
     }
 
     function fillSelect(id, start, end, selected, formatter) {
@@ -25,6 +41,13 @@
         }
     }
 
+    function initRegionSelect() {
+        const select = document.getElementById("birth-region");
+        select.innerHTML = REGIONS.map((region, index) => `<option value="${index}">${region.name}</option>`).join("");
+        select.value = "0";
+        applyRegion(REGIONS[0]);
+    }
+
     function bindEvents() {
         document.querySelectorAll(".nav-links a").forEach((link) => {
             link.addEventListener("click", (event) => {
@@ -36,6 +59,30 @@
         document.getElementById("btn-example").addEventListener("click", loadExample);
         document.getElementById("btn-save").addEventListener("click", saveCurrentProfile);
         document.getElementById("btn-clear-storage").addEventListener("click", clearProfiles);
+        document.getElementById("birth-region").addEventListener("change", handleRegionChange);
+        [
+            "birth-year",
+            "birth-month",
+            "birth-day",
+            "birth-time",
+            "birth-longitude",
+            "timezone-offset",
+            "solar-time-mode"
+        ].forEach((id) => {
+            document.getElementById(id).addEventListener("input", updatePreview);
+            document.getElementById(id).addEventListener("change", updatePreview);
+        });
+    }
+
+    function handleRegionChange(event) {
+        const region = REGIONS[Number(event.target.value)] || REGIONS[0];
+        applyRegion(region);
+        updatePreview();
+    }
+
+    function applyRegion(region) {
+        document.getElementById("birth-longitude").value = region.longitude.toFixed(2);
+        document.getElementById("timezone-offset").value = String(region.timezoneOffset);
     }
 
     function showSection(section) {
@@ -44,22 +91,29 @@
         document.querySelectorAll(".nav-links a").forEach((node) => node.classList.toggle("active", node.dataset.section === section));
     }
 
+    function getTimeParts() {
+        const raw = document.getElementById("birth-time").value || "09:30";
+        const [hour, minute] = raw.split(":").map(Number);
+        return { hour, minute };
+    }
+
     function getInput() {
-        const calendarType = document.getElementById("calendar-type").value;
-        const input = {
+        const { hour, minute } = getTimeParts();
+        const region = REGIONS[Number(document.getElementById("birth-region").value)] || REGIONS[0];
+        return {
             profileName: document.getElementById("profile-name").value.trim() || "未命名档案",
             year: Number(document.getElementById("birth-year").value),
             month: Number(document.getElementById("birth-month").value),
             day: Number(document.getElementById("birth-day").value),
-            hourIndex: Number(document.getElementById("birth-hour").value),
+            hour,
+            minute,
             gender: document.getElementById("gender").value,
-            calendarType,
-            targetYear: Number(document.getElementById("target-year").value)
+            targetYear: Number(document.getElementById("target-year").value),
+            solarTimeMode: document.getElementById("solar-time-mode").value,
+            timezoneOffset: Number(document.getElementById("timezone-offset").value),
+            longitude: Number(document.getElementById("birth-longitude").value),
+            regionName: region.name
         };
-        if (calendarType === "lunar") {
-            alert("当前离线版尚未内置完整农历换算库。为保证结果稳定，请先换算为公历后录入。");
-        }
-        return input;
     }
 
     function handleSubmit(event) {
@@ -85,12 +139,24 @@
         const { input, chart, dayun, liunian, liuyue, health, environment, report, lucky } = state.current;
         document.getElementById("env-year-label").textContent = input.targetYear;
         document.getElementById("liuyue-year-label").textContent = input.targetYear;
+        renderCalculationMeta(chart);
         renderPillars(chart);
         renderWuxing(chart);
         renderNarratives(chart);
         renderDayun(dayun, liunian, liuyue);
         renderHealth(health);
         renderAI(report, environment, lucky);
+    }
+
+    function renderCalculationMeta(chart) {
+        const solar = chart.solarMeta;
+        const cards = [
+            { title: "出生地与经度", body: `${chart.input.regionName} · 东经 ${chart.input.longitude.toFixed(2)}° · 时区 UTC${chart.input.timezoneOffset >= 0 ? "+" : ""}${chart.input.timezoneOffset}` },
+            { title: "标准时间", body: `${solar.standardText} · ${solar.standardShichen.label}（${solar.standardShichen.start}-${solar.standardShichen.end}）` },
+            { title: "真太阳时", body: `${solar.trueSolarText} · ${solar.trueSolarShichen.label}（${solar.trueSolarShichen.start}-${solar.trueSolarShichen.end}）` },
+            { title: "最终排盘依据", body: `${solar.usedMode === "trueSolar" ? "采用真太阳时" : "采用标准时间"}；修正 ${formatSigned(solar.totalOffsetMinutes)} 分钟` }
+        ];
+        document.getElementById("calculation-meta").innerHTML = cards.map((item) => `<div class="mini-card"><h3>${item.title}</h3><p>${item.body}</p></div>`).join("");
     }
 
     function renderPillars(chart) {
@@ -103,6 +169,7 @@
                     <div class="zhi">${pillar.branch}</div>
                 </div>
                 <p><strong>${pillar.tenGod}</strong></p>
+                ${index === 3 ? `<p class="muted">${chart.solarMeta.effectiveShichen.label}（${chart.solarMeta.effectiveShichen.start}-${chart.solarMeta.effectiveShichen.end}）</p>` : ""}
                 <p class="muted">藏干：${pillar.hidden.join("、")}</p>
                 <p class="muted">纳音：${pillar.nayin}</p>
             </div>
@@ -190,7 +257,43 @@
             document.getElementById("ai-report").innerHTML = report.map((item) => `<div class="report-block"><h3>${item.title}</h3><p>${item.body}</p></div>`).join("");
             document.getElementById("environment-analysis").innerHTML = `<div class="report-block"><h3>${environment.title}</h3><p>${environment.body}</p></div>`;
             document.getElementById("lucky-suggestions").innerHTML = lucky.map((item) => `<div class="report-block"><p>${item}</p></div>`).join("");
-        }, 250);
+        }, 180);
+    }
+
+    function getLunarText(year, month, day) {
+        const date = new Date(year, month - 1, day, 12, 0, 0);
+        const formatter = new Intl.DateTimeFormat("zh-Hans-CN-u-ca-chinese", { year: "numeric", month: "long", day: "numeric" });
+        const parts = formatter.formatToParts(date);
+        const relatedYear = parts.find((item) => item.type === "relatedYear")?.value || String(year);
+        const yearName = parts.find((item) => item.type === "yearName")?.value || "";
+        const monthName = parts.find((item) => item.type === "month")?.value || "";
+        const dayName = parts.find((item) => item.type === "day")?.value || "";
+        return `${relatedYear}${yearName ? `（${yearName}年）` : ""}${monthName}${dayName}日`;
+    }
+
+    function updatePreview() {
+        const input = getInput();
+        const solarMeta = BaziCore.buildSolarTimeMeta(input);
+        const lunarText = getLunarText(input.year, input.month, input.day);
+        const recommendation = solarMeta.autoUseTrueSolar
+            ? "自动模式下建议采用真太阳时，因为修正后已影响时柱或日期边界。"
+            : "自动模式下可继续使用标准时间，因为修正未跨越时柱或日期边界。";
+        document.getElementById("datetime-preview").innerHTML = `
+            <div class="preview-line"><span>公历</span><strong>${input.year}-${pad(input.month)}-${pad(input.day)} ${pad(input.hour)}:${pad(input.minute)}</strong></div>
+            <div class="preview-line"><span>对应农历</span><strong>${lunarText}</strong></div>
+            <div class="preview-line"><span>标准时辰</span><strong>${solarMeta.standardShichen.label}（${solarMeta.standardShichen.start}-${solarMeta.standardShichen.end}）</strong></div>
+            <div class="preview-line"><span>真太阳时</span><strong>${solarMeta.trueSolarText} · ${solarMeta.trueSolarShichen.label}</strong></div>
+            <div class="preview-line"><span>修正值</span><strong>${formatSigned(solarMeta.totalOffsetMinutes)} 分钟（经度 ${formatSigned(solarMeta.longitudeMinutes)}，均时差 ${formatSigned(solarMeta.equationMinutes)}）</strong></div>
+            <div class="preview-line"><span>自动建议</span><strong>${recommendation}</strong></div>
+        `;
+    }
+
+    function formatSigned(value) {
+        return `${value >= 0 ? "+" : ""}${value.toFixed(1)}`;
+    }
+
+    function pad(value) {
+        return String(value).padStart(2, "0");
     }
 
     function loadExample() {
@@ -198,10 +301,13 @@
         document.getElementById("birth-year").value = "1992";
         document.getElementById("birth-month").value = "8";
         document.getElementById("birth-day").value = "16";
-        document.getElementById("birth-hour").value = "4";
+        document.getElementById("birth-time").value = "08:36";
+        document.getElementById("birth-region").value = "0";
+        applyRegion(REGIONS[0]);
+        document.getElementById("solar-time-mode").value = "auto";
         document.getElementById("gender").value = "female";
-        document.getElementById("calendar-type").value = "solar";
         document.getElementById("target-year").value = String(new Date().getFullYear());
+        updatePreview();
         runAnalysis(getInput());
     }
 
@@ -236,7 +342,7 @@
             <div class="saved-item">
                 <div>
                     <strong>${item.name}</strong>
-                    <p class="muted">${item.input.year}-${item.input.month}-${item.input.day} · ${item.input.gender === "male" ? "男" : "女"}</p>
+                    <p class="muted">${item.input.year}-${pad(item.input.month)}-${pad(item.input.day)} ${pad(item.input.hour)}:${pad(item.input.minute)} · ${item.input.regionName}</p>
                 </div>
                 <button class="btn-link" data-load-id="${item.id}">载入</button>
             </div>
@@ -246,6 +352,7 @@
                 const profile = profiles.find((item) => String(item.id) === button.dataset.loadId);
                 if (!profile) return;
                 applyInput(profile.input, profile.name);
+                updatePreview();
                 runAnalysis(profile.input);
             });
         });
@@ -256,10 +363,14 @@
         document.getElementById("birth-year").value = String(input.year);
         document.getElementById("birth-month").value = String(input.month);
         document.getElementById("birth-day").value = String(input.day);
-        document.getElementById("birth-hour").value = String(input.hourIndex);
+        document.getElementById("birth-time").value = `${pad(input.hour)}:${pad(input.minute)}`;
         document.getElementById("gender").value = input.gender;
-        document.getElementById("calendar-type").value = input.calendarType || "solar";
         document.getElementById("target-year").value = String(input.targetYear || new Date().getFullYear());
+        document.getElementById("solar-time-mode").value = input.solarTimeMode || "auto";
+        document.getElementById("timezone-offset").value = String(input.timezoneOffset ?? 8);
+        document.getElementById("birth-longitude").value = Number(input.longitude).toFixed(2);
+        const regionIndex = Math.max(REGIONS.findIndex((region) => region.name === input.regionName), 0);
+        document.getElementById("birth-region").value = String(regionIndex);
     }
 
     function clearProfiles() {
@@ -270,5 +381,6 @@
     initSelects();
     bindEvents();
     renderSavedProfiles();
+    updatePreview();
     loadExample();
 })();
