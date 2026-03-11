@@ -693,6 +693,14 @@
                     <div id="llm-agent-report"></div>
                     <div id="ai-report"></div>
                 </div>
+                <div class="card">
+                    <h2>预测校准反馈</h2>
+                    <div class="form-actions">
+                        <p id="prediction-feedback-summary" class="muted">暂未收集校准反馈。</p>
+                        <button type="button" class="btn btn-secondary" id="btn-feedback-clear">清空反馈</button>
+                    </div>
+                    <div id="prediction-feedback-list" class="pair-grid"></div>
+                </div>
                 <div class="grid-2">
                     <div class="card">
                         <h2>大环境分析（<span id="env-year-label"></span>年）</h2>
@@ -793,6 +801,13 @@
         <button type="button" class="btn btn-secondary" id="btn-float-export">导出报告</button>
         <button type="button" class="btn btn-secondary" id="btn-float-print">打印</button>
     </div>
+
+    <template id="tpl-calendar-day">
+        <button type="button" class="calendar-day">
+            <span class="date"></span>
+            <span class="lvl"></span>
+        </button>
+    </template>
 
     <script src="js/vendor/lunar.js"></script>
     <script src="js/bazi-core.js?v=20260311"></script>

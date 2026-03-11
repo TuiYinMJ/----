@@ -914,6 +914,16 @@ canvas {
     padding: 16px 18px;
 }
 
+#prediction-feedback-summary {
+    margin: 0;
+    flex: 1 1 260px;
+}
+
+#prediction-feedback-list {
+    max-height: 360px;
+    overflow-y: auto;
+}
+
 .modal.hidden {
     display: none;
 }

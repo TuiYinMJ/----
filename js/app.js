@@ -4,6 +4,9 @@
     const AI_CONFIG_KEY = "tming-ai-config-v1";
     const GEO_CONFIG_KEY = "tming-geo-config-v1";
     const LIFE_EVENT_KEY = "tming-life-events-v1";
+    const FEEDBACK_KEY = "tming-feedback-v1";
+    const ANALYSIS_WORKER_URL = "js/analysis-worker.js?v=20260311";
+    const VECTOR_WORKER_URL = "js/vector-worker.js?v=20260311";
     const LUNAR_MONTH_NAMES = ["正月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "冬月", "腊月"];
     const REGIONS = [
         { name: "上海", longitude: 121.47, timezoneOffset: 8 },
@@ -89,12 +92,22 @@
         current: null,
         ai: null,
         calendarSelection: { year: null, month: null, selectedDate: null },
+        calendarCache: { key: "", rows: [] },
+        calendarRenderToken: 0,
         storage: {
             aiConfig: null,
             geoConfig: null,
             profilesCache: [],
             lifeEventsCache: [],
-            compatProfilesCache: []
+            compatProfilesCache: [],
+            feedbackCache: []
+        },
+        workers: {
+            analysis: null,
+            vector: null,
+            pending: new Map(),
+            seq: 1,
+            vectorIndexStamp: ""
         },
         paging: {
             profiles: { page: 1, pageSize: 12, total: 0 },
@@ -102,6 +115,7 @@
             compatProfiles: { page: 1, pageSize: 10, total: 0 }
         }
     };
+    let html2canvasLoader = null;
     const TRUE_SOLAR_GROUPS = {
         high: "建议重点核对真太阳时（偏差 >= 40 分钟）",
         low: "通常标准时即可（偏差 < 40 分钟）",
@@ -212,6 +226,26 @@
         return safe;
     }
 
+    function loadPredictionFeedback() {
+        return Array.isArray(state.storage.feedbackCache)
+            ? state.storage.feedbackCache.map((item) => ({ ...item }))
+            : [];
+    }
+
+    function savePredictionFeedback(feedbackRows) {
+        const safeRows = (feedbackRows || [])
+            .filter((item) => item && item.id && item.scope && item.verdict)
+            .slice(-400)
+            .map((item) => ({ ...item }));
+        state.storage.feedbackCache = safeRows;
+        if (window.LocalDB?.available) {
+            window.LocalDB.setKv(FEEDBACK_KEY, safeRows).catch(() => {});
+        } else {
+            localStorage.setItem(FEEDBACK_KEY, JSON.stringify(safeRows));
+        }
+        return safeRows;
+    }
+
     function clearLegacyBusinessStorage() {
         localStorage.removeItem(STORAGE_KEY);
         localStorage.removeItem(LIFE_EVENT_KEY);
@@ -228,19 +262,24 @@
         const localCompatProfiles = Array.isArray(safeParse(localStorage.getItem(COMPAT_STORAGE_KEY), []))
             ? safeParse(localStorage.getItem(COMPAT_STORAGE_KEY), [])
             : [];
+        const localFeedback = Array.isArray(safeParse(localStorage.getItem(FEEDBACK_KEY), []))
+            ? safeParse(localStorage.getItem(FEEDBACK_KEY), [])
+            : [];
         state.storage.aiConfig = { ...defaultAiConfig(), ...(safeParse(localStorage.getItem(AI_CONFIG_KEY), {}) || {}) };
         state.storage.geoConfig = { ...defaultGeoConfig(), ...(safeParse(localStorage.getItem(GEO_CONFIG_KEY), {}) || {}) };
         saveProfiles(localProfiles);
         saveLifeEvents(localLifeEvents);
         saveCompatProfiles(localCompatProfiles);
+        savePredictionFeedback(localFeedback);
         state.paging.profiles.total = localProfiles.length;
         state.paging.lifeEvents.total = localLifeEvents.length;
         state.paging.compatProfiles.total = localCompatProfiles.length;
         if (!window.LocalDB?.available) return;
         await window.LocalDB.ready;
-        const [dbAi, dbGeo, profileCount, lifeEventCount, compatCount, dbLifeEvents] = await Promise.all([
+        const [dbAi, dbGeo, dbFeedback, profileCount, lifeEventCount, compatCount, dbLifeEvents] = await Promise.all([
             window.LocalDB.getKv(AI_CONFIG_KEY),
             window.LocalDB.getKv(GEO_CONFIG_KEY),
+            window.LocalDB.getKv(FEEDBACK_KEY),
             window.LocalDB.countProfiles(),
             window.LocalDB.countLifeEvents(),
             window.LocalDB.countCompatProfiles(),
@@ -250,6 +289,8 @@
         else await window.LocalDB.setKv(AI_CONFIG_KEY, state.storage.aiConfig);
         if (dbGeo) state.storage.geoConfig = { ...defaultGeoConfig(), ...(dbGeo || {}) };
         else await window.LocalDB.setKv(GEO_CONFIG_KEY, state.storage.geoConfig);
+        if (Array.isArray(dbFeedback) && dbFeedback.length) savePredictionFeedback(dbFeedback);
+        else await window.LocalDB.setKv(FEEDBACK_KEY, loadPredictionFeedback());
         if (!profileCount && localProfiles.length) await window.LocalDB.replaceProfiles(localProfiles);
         if (!lifeEventCount && localLifeEvents.length) await window.LocalDB.replaceLifeEvents(localLifeEvents);
         if (!compatCount && localCompatProfiles.length) await window.LocalDB.replaceCompatProfiles(localCompatProfiles);
@@ -258,6 +299,67 @@
         state.paging.profiles.total = profileCount || localProfiles.length;
         state.paging.lifeEvents.total = (dbLifeEvents?.length ?? lifeEventCount) || localLifeEvents.length;
         state.paging.compatProfiles.total = compatCount || localCompatProfiles.length;
+    }
+
+    function makeWorker(url) {
+        if (typeof Worker === "undefined") return null;
+        try {
+            return new Worker(url);
+        } catch {
+            return null;
+        }
+    }
+
+    function dispatchWorkerTask(worker, type, payload, timeoutMs = 180000) {
+        if (!worker) return Promise.reject(new Error("worker-unavailable"));
+        const taskId = `task-${Date.now()}-${state.workers.seq++}`;
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                state.workers.pending.delete(taskId);
+                reject(new Error(`worker-timeout:${type}`));
+            }, timeoutMs);
+            state.workers.pending.set(taskId, {
+                resolve,
+                reject,
+                timer
+            });
+            try {
+                worker.postMessage({ taskId, type, payload });
+            } catch (error) {
+                clearTimeout(timer);
+                state.workers.pending.delete(taskId);
+                reject(error);
+            }
+        });
+    }
+
+    function bindWorkerChannel(worker) {
+        if (!worker) return;
+        worker.addEventListener("message", (event) => {
+            const { taskId, ok, data, error } = event.data || {};
+            if (!taskId || !state.workers.pending.has(taskId)) return;
+            const task = state.workers.pending.get(taskId);
+            clearTimeout(task.timer);
+            state.workers.pending.delete(taskId);
+            if (ok) task.resolve(data);
+            else task.reject(new Error(error || "worker-failed"));
+        });
+        worker.addEventListener("error", (error) => {
+            console.error("[worker-error]", error);
+        });
+    }
+
+    function initWorkers() {
+        state.workers.analysis = makeWorker(ANALYSIS_WORKER_URL);
+        state.workers.vector = makeWorker(VECTOR_WORKER_URL);
+        bindWorkerChannel(state.workers.analysis);
+        bindWorkerChannel(state.workers.vector);
+    }
+
+    function invalidateVectorIndex() {
+        state.workers.vectorIndexStamp = "";
+        if (!state.workers.vector) return;
+        dispatchWorkerTask(state.workers.vector, "clear-index", {}, 15000).catch(() => {});
     }
 
     function getLocalPagedRows(rows, page, pageSize) {
@@ -635,14 +737,21 @@
         $("btn-kb-export").addEventListener("click", exportKnowledgeBase);
         $("btn-kb-seed").addEventListener("click", resetKnowledgeBase);
         $("btn-kb-add").addEventListener("click", addKnowledgeBaseEntry);
+        $("btn-feedback-clear")?.addEventListener("click", clearPredictionFeedback);
         $("kb-file-input").addEventListener("change", importKnowledgeBaseFiles);
         $("btn-geo-search").addEventListener("click", geocodeBirthPlace);
         $("btn-open-settings").addEventListener("click", openSettingsModal);
         $("btn-close-settings").addEventListener("click", closeSettingsModal);
         $("btn-life-event-add").addEventListener("click", addLifeEventFromForm);
         $("btn-reverse-search").addEventListener("click", runReverseLookup);
-        $("daily-calendar-year").addEventListener("change", renderDailyCalendar);
-        $("daily-calendar-month").addEventListener("change", renderDailyCalendar);
+        $("daily-calendar-year").addEventListener("change", () => { renderDailyCalendar(); });
+        $("daily-calendar-month").addEventListener("change", () => { renderDailyCalendar(); });
+        $("daily-calendar-grid").addEventListener("click", (event) => {
+            const button = event.target.closest("[data-calendar-date]");
+            if (!button) return;
+            state.calendarSelection.selectedDate = button.dataset.calendarDate || null;
+            renderDailyCalendar();
+        });
         $("btn-save-settings").addEventListener("click", () => {
             persistGeoConfigFromForm();
             closeSettingsModal();
@@ -975,6 +1084,64 @@
         if (state.current) state.current.lifeEvents = loadLifeEvents();
     }
 
+    function feedbackVerdictLabel(verdict) {
+        return verdict === "match" ? "符合现实" : "不符合现实";
+    }
+
+    function renderFeedbackHistory() {
+        const summaryEl = $("prediction-feedback-summary");
+        const listEl = $("prediction-feedback-list");
+        if (!summaryEl || !listEl) return;
+        const rows = loadPredictionFeedback()
+            .slice()
+            .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+            .slice(0, 20);
+        if (!rows.length) {
+            summaryEl.textContent = "暂未收集校准反馈。";
+            listEl.innerHTML = `<div class="mini-card"><p class="muted">可在“流年/流月事件卡片”点击“符合现实/不符合现实”，系统会把结果用于后续 LLM 提示词校准。</p></div>`;
+            return;
+        }
+        const matchCount = rows.filter((row) => row.verdict === "match").length;
+        const mismatchCount = rows.length - matchCount;
+        summaryEl.textContent = `最近 ${rows.length} 条：符合 ${matchCount} 条，不符合 ${mismatchCount} 条。`;
+        listEl.innerHTML = rows.map((row) => `
+            <div class="mini-card ${row.verdict === "mismatch" ? "warning-card" : ""}">
+                <p class="section-kicker">${escapeHtml(row.scope === "year" ? "流年校准" : "流月校准")} · ${escapeHtml(feedbackVerdictLabel(row.verdict))}</p>
+                <h3>${escapeHtml(row.meta || "-")}</h3>
+                <p>${escapeHtml(row.summary || row.note || "无摘要")}</p>
+                <p class="muted">${new Date(row.createdAt || Date.now()).toLocaleString("zh-CN")}</p>
+            </div>
+        `).join("");
+    }
+
+    function pushPredictionFeedback(payload, verdict) {
+        if (!payload || !verdict) return;
+        const rows = loadPredictionFeedback();
+        rows.push({
+            id: `fb-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+            scope: payload.scope || "year",
+            verdict,
+            year: Number(payload.year || 0) || null,
+            month: Number(payload.month || 0) || null,
+            pillar: payload.pillar || "",
+            meta: payload.meta || "",
+            summary: payload.summary || "",
+            note: payload.note || "",
+            createdAt: Date.now()
+        });
+        savePredictionFeedback(rows);
+        if (state.current) state.current.feedbackHistory = loadPredictionFeedback();
+        renderFeedbackHistory();
+        renderLlmStatus(`已记录反馈：${feedbackVerdictLabel(verdict)}（${payload.meta || payload.pillar || "当前项"}）。下次 LLM 分析会参考这条校准样本。`);
+    }
+
+    function clearPredictionFeedback() {
+        if (!confirm("确认清空全部校准反馈记录？")) return;
+        savePredictionFeedback([]);
+        if (state.current) state.current.feedbackHistory = [];
+        renderFeedbackHistory();
+    }
+
     function syncLunarLeap(config) {
         const selection = getMonthSelection(config);
         $(config.lunarLeap).value = selection.lunarLeap ? "1" : "0";
@@ -1184,8 +1351,33 @@
         }
     }
 
+    function getBirthYearFromChart(chart) {
+        const direct = Number(chart?.birthYear);
+        if (Number.isFinite(direct) && direct > 0) return direct;
+        const text = String(chart?.solarMeta?.standardText || "");
+        const fromText = Number(text.slice(0, 4));
+        if (Number.isFinite(fromText) && fromText > 0) return fromText;
+        const inputYear = Number(chart?.input?.year);
+        return Number.isFinite(inputYear) ? inputYear : new Date().getFullYear();
+    }
+
+    function buildWorkerSafeChart(chart) {
+        if (!chart) return null;
+        const safe = { ...chart };
+        delete safe.source;
+        if (safe.solarMeta) {
+            safe.solarMeta = { ...safe.solarMeta };
+            delete safe.solarMeta.standardSolar;
+            delete safe.solarMeta.trueSolar;
+            delete safe.solarMeta.effectiveSolar;
+            delete safe.solarMeta.standardLunar;
+            delete safe.solarMeta.effectiveLunar;
+        }
+        return safe;
+    }
+
     function buildAllYearEvaluations(chart, dayun) {
-        const birthYear = chart.source.standardSolar.getYear();
+        const birthYear = getBirthYearFromChart(chart);
         const rows = [];
         dayun.list.forEach((dayunEntry) => {
             DayunEngine.buildLiuNian(dayunEntry).forEach((item) => {
@@ -1216,7 +1408,37 @@
             .sort((a, b) => a.year - b.year);
     }
 
-    function runAnalysis(primaryInput) {
+    function mergeAnalysisState(baseState) {
+        const lifeEvents = loadLifeEvents();
+        const feedbackHistory = loadPredictionFeedback();
+        const kbMatches = KnowledgeBaseEngine.matchEntries(
+            baseState.chart,
+            baseState.currentYearEval,
+            baseState.currentMonthEval,
+            baseState.compatibility
+        );
+        const caseMatches = KnowledgeBaseEngine.matchCaseEntries(
+            baseState.chart,
+            baseState.currentYearEval,
+            baseState.currentMonthEval,
+            baseState.compatibility,
+            null,
+            5
+        );
+        return {
+            ...baseState,
+            lifeEvents,
+            feedbackHistory,
+            kbMatches,
+            caseMatches,
+            ragMatches: [],
+            ragReferences: [],
+            llmReport: "",
+            agentReports: {}
+        };
+    }
+
+    function runAnalysisSync(primaryInput, compatInput = null) {
         const chart = BaziCore.computeBaZi(primaryInput);
         const dayun = DayunEngine.buildDaYun(chart, primaryInput.targetYear);
         const liunian = DayunEngine.buildLiuNian(dayun.current);
@@ -1257,9 +1479,9 @@
         const report = AIEngine.buildReport(chart, dayun, currentYearEval, currentMonthEval, health, primaryInput.targetYear);
         const lucky = AIEngine.buildLuckySuggestions(chart, currentYearEval, currentMonthEval, health);
         let compatibility = null;
-        const compatInput = getProfileInput(PROFILE_CONFIGS.compat);
-        if (compatInput) {
-            const compatChart = BaziCore.computeBaZi(compatInput);
+        const currentCompatInput = compatInput || getProfileInput(PROFILE_CONFIGS.compat);
+        if (currentCompatInput) {
+            const compatChart = BaziCore.computeBaZi(currentCompatInput);
             const compatDayun = DayunEngine.buildDaYun(compatChart, primaryInput.targetYear);
             const compatAllYearEvaluations = buildAllYearEvaluations(compatChart, compatDayun);
             const primaryYears = new Map(allYearEvaluations.map((item) => [item.year, item.evaluation.scores.overall]));
@@ -1272,17 +1494,14 @@
                     compat: item.evaluation.scores.overall
                 }));
             compatibility = {
-                input: compatInput,
+                input: currentCompatInput,
                 chart: compatChart,
                 result: CompatibilityEngine.buildCompatibility(chart, compatChart),
                 pairedTrend
             };
         }
         const modern = BaziAnalysis.buildModernLifeAdvice(chart, compatibility?.result || null, primaryInput.targetYear);
-        const kbMatches = KnowledgeBaseEngine.matchEntries(chart, currentYearEval, currentMonthEval, compatibility);
-        const caseMatches = KnowledgeBaseEngine.matchCaseEntries(chart, currentYearEval, currentMonthEval, compatibility, null, 5);
-        const lifeEvents = loadLifeEvents();
-        state.current = {
+        state.current = mergeAnalysisState({
             input: primaryInput,
             chart,
             dayun,
@@ -1301,17 +1520,33 @@
             eventDashboard,
             dailyGuide,
             compatibility,
-            lifeEvents,
-            kbMatches,
-            caseMatches,
-            ragMatches: [],
-            ragReferences: [],
-            llmReport: "",
-            agentReports: {},
             report,
             lucky
-        };
+        });
         showSection("bazi");
+    }
+
+    async function runAnalysis(primaryInput) {
+        if (!primaryInput) return;
+        state.calendarCache = { key: "", rows: [] };
+        const compatInput = getProfileInput(PROFILE_CONFIGS.compat);
+        if (!state.workers.analysis) {
+            runAnalysisSync(primaryInput, compatInput);
+            return;
+        }
+        try {
+            const analysisData = await dispatchWorkerTask(state.workers.analysis, "compute-analysis", {
+                primaryInput,
+                compatInput,
+                nowYear: new Date().getFullYear(),
+                nowMonth: new Date().getMonth() + 1
+            });
+            state.current = mergeAnalysisState(analysisData);
+            showSection("bazi");
+        } catch (error) {
+            console.warn("[analysis-worker-fallback]", error);
+            runAnalysisSync(primaryInput, compatInput);
+        }
     }
 
     function renderAll() {
@@ -1606,7 +1841,7 @@
         };
     }
 
-    function buildHourlyWindowGuide(dateText) {
+    function buildHourlyWindowGuideSync(dateText) {
         if (!state.current) return [];
         const [year, month, day] = String(dateText || "").split("-").map(Number);
         if (!year || !month || !day) return [];
@@ -1689,6 +1924,22 @@
         });
     }
 
+    async function buildHourlyWindowGuide(dateText) {
+        if (!state.current) return [];
+        if (!state.workers.analysis) return buildHourlyWindowGuideSync(dateText);
+        try {
+            const rows = await dispatchWorkerTask(state.workers.analysis, "build-hourly-guide", {
+                chart: buildWorkerSafeChart(state.current.chart),
+                dayunLabel: state.current.dayun.current.label,
+                dateText
+            }, 90000);
+            return Array.isArray(rows) ? rows : [];
+        } catch (error) {
+            console.warn("[hourly-guide-worker-fallback]", error);
+            return buildHourlyWindowGuideSync(dateText);
+        }
+    }
+
     function trimText(text, maxLen = 34) {
         const raw = String(text || "").replace(/\s+/g, " ").trim();
         if (raw.length <= maxLen) return raw;
@@ -1717,14 +1968,59 @@
         return rows;
     }
 
-    function renderDailyCalendar() {
+    async function getDailyCalendarRows(year, month) {
+        if (!state.current) return [];
+        const dayCount = new Date(year, month, 0).getDate();
+        const key = `${state.current.chart?.solarMeta?.effectiveText || ""}|${state.current.dayun?.current?.label || ""}|${year}-${month}`;
+        if (state.calendarCache.key === key && Array.isArray(state.calendarCache.rows) && state.calendarCache.rows.length) {
+            return state.calendarCache.rows;
+        }
+        let rows = [];
+        if (state.workers.analysis) {
+            try {
+                const workerRows = await dispatchWorkerTask(state.workers.analysis, "build-daily-guide", {
+                    chart: buildWorkerSafeChart(state.current.chart),
+                    dayunLabel: state.current.dayun.current.label,
+                    year,
+                    month,
+                    dayCount
+                }, 90000);
+                rows = Array.isArray(workerRows) ? workerRows : [];
+            } catch (error) {
+                console.warn("[daily-guide-worker-fallback]", error);
+            }
+        }
+        if (!rows.length) {
+            rows = BaziAnalysis.buildDailyGuide(state.current.chart, state.current.dayun.current.label, new Date(year, month - 1, 1), dayCount);
+        }
+        state.calendarCache = { key, rows };
+        return rows;
+    }
+
+    function renderDailyCalendarDetail(detail, selected, best, risky, daySignal) {
+        detail.innerHTML = "";
+        const row1 = document.createElement("p");
+        row1.innerHTML = `<strong>${escapeHtml(selected.date)}</strong>（${escapeHtml(selected.pillar)}） · ${escapeHtml(selected.level)} · 评分 ${selected.score}`;
+        const row2 = document.createElement("p");
+        row2.className = "good-text";
+        row2.textContent = `日内顺时段：${best.map((item) => `${item.label}(${item.range}) · ${trimText(item.chanceHint || item.focusTag || item.note, 22)}`).join("；") || "暂无明显顺时段"}`;
+        const row3 = document.createElement("p");
+        row3.className = "bad-text";
+        row3.textContent = `日内谨慎时段：${risky.map((item) => `${item.label}(${item.range}) · ${trimText(item.riskHint || item.focusTag || item.note, 22)}`).join("；") || "暂无明显谨慎时段"}`;
+        const row4 = document.createElement("p");
+        row4.textContent = `重点提醒：${daySignal || "今日整体中性，按计划推进，避免临时起意。"}。`;
+        detail.append(row1, row2, row3, row4);
+    }
+
+    async function renderDailyCalendar() {
         const grid = $("daily-calendar-grid");
         const detail = $("daily-calendar-detail");
         if (!grid || !detail || !state.current) return;
         const year = Number($("daily-calendar-year").value || state.current.input.targetYear);
         const month = Number($("daily-calendar-month").value || (new Date().getMonth() + 1));
-        const dayCount = new Date(year, month, 0).getDate();
-        const rows = BaziAnalysis.buildDailyGuide(state.current.chart, state.current.dayun.current.label, new Date(year, month - 1, 1), dayCount);
+        const renderToken = ++state.calendarRenderToken;
+        const rows = await getDailyCalendarRows(year, month);
+        if (renderToken !== state.calendarRenderToken) return;
         if (!rows.length) {
             grid.innerHTML = `<div class="mini-card"><p>当前月份暂无日历数据。</p></div>`;
             detail.innerHTML = `<p class="muted">请选择其他月份。</p>`;
@@ -1734,14 +2030,35 @@
             ? state.calendarSelection.selectedDate
             : rows[0].date;
         state.calendarSelection = { year, month, selectedDate };
-        grid.innerHTML = rows.map((item) => `
-            <button type="button" class="calendar-day ${item.level === "宜" ? "lv-good" : item.level === "慎" ? "lv-bad" : "lv-mid"} ${item.date === selectedDate ? "active" : ""}" data-calendar-date="${item.date}">
-                <span class="date">${Number(item.date.split("-")[2])}</span>
-                <span class="lvl">${item.level} · ${item.score}</span>
-            </button>
-        `).join("");
+        const dayTemplate = $("tpl-calendar-day");
+        grid.innerHTML = "";
+        const fragment = document.createDocumentFragment();
+        rows.forEach((item) => {
+            let button;
+            if (dayTemplate?.content?.firstElementChild) {
+                button = dayTemplate.content.firstElementChild.cloneNode(true);
+            } else {
+                button = document.createElement("button");
+                button.type = "button";
+                button.className = "calendar-day";
+                const dateSpan = document.createElement("span");
+                dateSpan.className = "date";
+                const levelSpan = document.createElement("span");
+                levelSpan.className = "lvl";
+                button.append(dateSpan, levelSpan);
+            }
+            button.classList.remove("lv-good", "lv-mid", "lv-bad", "active");
+            button.classList.add(item.level === "宜" ? "lv-good" : item.level === "慎" ? "lv-bad" : "lv-mid");
+            if (item.date === selectedDate) button.classList.add("active");
+            button.dataset.calendarDate = item.date;
+            button.querySelector(".date").textContent = String(Number(item.date.split("-")[2]));
+            button.querySelector(".lvl").textContent = `${item.level} · ${item.score}`;
+            fragment.appendChild(button);
+        });
+        grid.appendChild(fragment);
         const selected = rows.find((item) => item.date === selectedDate) || rows[0];
-        const hourlyGuide = rankHourlyGuide(buildHourlyWindowGuide(selected.date));
+        const hourlyGuide = rankHourlyGuide(await buildHourlyWindowGuide(selected.date));
+        if (renderToken !== state.calendarRenderToken) return;
         const bestCandidates = [...hourlyGuide]
             .sort((a, b) => b.chanceWeight - a.chanceWeight || b.score - a.score || b.delta - a.delta || a.hourIndex - b.hourIndex);
         const riskCandidates = [...hourlyGuide]
@@ -1755,18 +2072,7 @@
             topChance ? `推进窗口：${topChance.label}（${trimText(topChance.chanceHint || topChance.note, 28)}）` : "",
             selected.note ? `流日提示：${trimText(selected.note, 36)}` : ""
         ].filter(Boolean).join("；");
-        detail.innerHTML = [
-            `<p><strong>${selected.date}</strong>（${selected.pillar}） · ${selected.level} · 评分 ${selected.score}</p>`,
-            `<p class="good-text">日内顺时段：${best.map((item) => `${item.label}(${item.range}) · ${trimText(item.chanceHint || item.focusTag || item.note, 22)}`).join("；") || "暂无明显顺时段"}</p>`,
-            `<p class="bad-text">日内谨慎时段：${risky.map((item) => `${item.label}(${item.range}) · ${trimText(item.riskHint || item.focusTag || item.note, 22)}`).join("；") || "暂无明显谨慎时段"}</p>`,
-            `<p>重点提醒：${daySignal || "今日整体中性，按计划推进，避免临时起意。"}。</p>`
-        ].join("");
-        grid.querySelectorAll("[data-calendar-date]").forEach((button) => {
-            button.addEventListener("click", () => {
-                state.calendarSelection.selectedDate = button.dataset.calendarDate;
-                renderDailyCalendar();
-            });
-        });
+        renderDailyCalendarDetail(detail, selected, best, risky, daySignal);
     }
 
     function renderLifeRoadmap(allYearEvaluations, criticalYears) {
@@ -1774,7 +2080,7 @@
         const summary = $("life-roadmap-summary");
         const overlay = $("life-roadmap-overlay");
         if (!canvas || !summary) return;
-        const birthYear = state.current.chart.source.standardSolar.getYear();
+        const birthYear = getBirthYearFromChart(state.current.chart);
         const byYear = new Map((allYearEvaluations || []).map((item) => [item.year, item]));
         const points = [];
         for (let age = 0; age <= 80; age++) {
@@ -2016,8 +2322,56 @@
             ],
             monthEvaluations.map((item) => `${item.month}`)
         );
-        $("year-events").innerHTML = yearEvaluations.map((item) => `<div class="mini-card"><h3>${item.year}年</h3><p class="good-text">可能发生：${item.evaluation.opportunities.join(" ")}</p><p class="bad-text">需要注意：${item.evaluation.risks.join(" ")}</p></div>`).join("");
-        $("month-events").innerHTML = monthEvaluations.map((item) => `<div class="mini-card"><h3>${item.month}月</h3><p class="good-text">可能发生：${item.evaluation.opportunities.join(" ")}</p><p class="bad-text">需要注意：${item.evaluation.risks.join(" ")}</p></div>`).join("");
+        const yearContainer = $("year-events");
+        const monthContainer = $("month-events");
+        yearContainer.innerHTML = yearEvaluations.map((item) => {
+            const meta = `${item.year}年 · ${item.pillar}`;
+            const summary = item.evaluation.blunt || `${item.year}年综合评估`;
+            const note = `可能发生：${item.evaluation.opportunities.join(" ")}；需要注意：${item.evaluation.risks.join(" ")}`;
+            return `
+                <div class="mini-card">
+                    <h3>${item.year}年</h3>
+                    <p class="good-text">可能发生：${item.evaluation.opportunities.join(" ")}</p>
+                    <p class="bad-text">需要注意：${item.evaluation.risks.join(" ")}</p>
+                    <div class="form-actions">
+                        <button type="button" class="btn-link" data-feedback-scope="year" data-feedback-verdict="match" data-feedback-year="${item.year}" data-feedback-pillar="${escapeHtml(item.pillar)}" data-feedback-meta="${escapeHtml(meta)}" data-feedback-summary="${escapeHtml(summary)}" data-feedback-note="${escapeHtml(note)}">符合现实</button>
+                        <button type="button" class="btn-link" data-feedback-scope="year" data-feedback-verdict="mismatch" data-feedback-year="${item.year}" data-feedback-pillar="${escapeHtml(item.pillar)}" data-feedback-meta="${escapeHtml(meta)}" data-feedback-summary="${escapeHtml(summary)}" data-feedback-note="${escapeHtml(note)}">不符合现实</button>
+                    </div>
+                </div>
+            `;
+        }).join("");
+        monthContainer.innerHTML = monthEvaluations.map((item) => {
+            const year = Number($(PROFILE_CONFIGS.primary.targetYear).value || state.current?.input?.targetYear || new Date().getFullYear());
+            const meta = `${year}年${item.month}月 · ${item.pillar}`;
+            const summary = item.evaluation.blunt || `${item.month}月综合评估`;
+            const note = `可能发生：${item.evaluation.opportunities.join(" ")}；需要注意：${item.evaluation.risks.join(" ")}`;
+            return `
+                <div class="mini-card">
+                    <h3>${item.month}月</h3>
+                    <p class="good-text">可能发生：${item.evaluation.opportunities.join(" ")}</p>
+                    <p class="bad-text">需要注意：${item.evaluation.risks.join(" ")}</p>
+                    <div class="form-actions">
+                        <button type="button" class="btn-link" data-feedback-scope="month" data-feedback-verdict="match" data-feedback-year="${year}" data-feedback-month="${item.month}" data-feedback-pillar="${escapeHtml(item.pillar)}" data-feedback-meta="${escapeHtml(meta)}" data-feedback-summary="${escapeHtml(summary)}" data-feedback-note="${escapeHtml(note)}">符合现实</button>
+                        <button type="button" class="btn-link" data-feedback-scope="month" data-feedback-verdict="mismatch" data-feedback-year="${year}" data-feedback-month="${item.month}" data-feedback-pillar="${escapeHtml(item.pillar)}" data-feedback-meta="${escapeHtml(meta)}" data-feedback-summary="${escapeHtml(summary)}" data-feedback-note="${escapeHtml(note)}">不符合现实</button>
+                    </div>
+                </div>
+            `;
+        }).join("");
+        [yearContainer, monthContainer].forEach((container) => {
+            container.querySelectorAll("[data-feedback-verdict]").forEach((button) => {
+                button.addEventListener("click", () => {
+                    pushPredictionFeedback({
+                        scope: button.dataset.feedbackScope,
+                        year: button.dataset.feedbackYear,
+                        month: button.dataset.feedbackMonth,
+                        pillar: button.dataset.feedbackPillar || "",
+                        meta: button.dataset.feedbackMeta || "",
+                        summary: button.dataset.feedbackSummary || "",
+                        note: button.dataset.feedbackNote || ""
+                    }, button.dataset.feedbackVerdict || "");
+                });
+            });
+        });
     }
 
     function renderFocusNarratives(yearEvaluations, monthEvaluations) {
@@ -2185,6 +2539,7 @@
 
     function removeKnowledgeBaseEntry(id) {
         KnowledgeBaseEngine.removeEntry(id);
+        invalidateVectorIndex();
         refreshKnowledgeBaseMatches();
     }
 
@@ -2201,6 +2556,63 @@
         return Array.from(bucket.values())
             .sort((a, b) => (b.score || 0) - (a.score || 0))
             .slice(0, 8);
+    }
+
+    function buildVectorIndexStamp(entries) {
+        const list = Array.isArray(entries) ? entries : [];
+        let hash = 2166136261;
+        const pushText = (text) => {
+            const raw = String(text || "");
+            for (let i = 0; i < raw.length; i++) {
+                hash ^= raw.charCodeAt(i);
+                hash = Math.imul(hash, 16777619);
+            }
+        };
+        list.forEach((entry) => {
+            if (!Array.isArray(entry.embedding) || !entry.embedding.length) return;
+            pushText(entry.id);
+            pushText(entry.embeddingModel || "");
+            pushText(entry.embeddingUpdatedAt || "");
+            pushText(entry.embedding.length || 0);
+        });
+        return `${list.length}-${hash >>> 0}`;
+    }
+
+    async function ensureVectorIndex(entries) {
+        if (!state.workers.vector) return false;
+        const embeddingRows = (entries || []).filter((entry) => Array.isArray(entry.embedding) && entry.embedding.length);
+        if (!embeddingRows.length) return false;
+        const stamp = buildVectorIndexStamp(embeddingRows);
+        if (stamp === state.workers.vectorIndexStamp) return true;
+        const payloadRows = embeddingRows.map((entry) => ({
+            id: entry.id,
+            embeddingModel: entry.embeddingModel || "",
+            embedding: entry.embedding
+        }));
+        await dispatchWorkerTask(state.workers.vector, "build-index", { stamp, entries: payloadRows }, 180000);
+        state.workers.vectorIndexStamp = stamp;
+        return true;
+    }
+
+    async function semanticMatchWithWorker(queryEmbedding, entries, limit = 6) {
+        if (!Array.isArray(queryEmbedding) || !queryEmbedding.length) return [];
+        if (!await ensureVectorIndex(entries)) return [];
+        const rows = await dispatchWorkerTask(state.workers.vector, "query-index", {
+            queryEmbedding,
+            limit,
+            minScore: 0.15
+        }, 60000);
+        const entryById = new Map((entries || []).map((entry) => [entry.id, entry]));
+        return (Array.isArray(rows) ? rows : [])
+            .map((item) => {
+                const entry = entryById.get(item.id);
+                if (!entry) return null;
+                return {
+                    ...entry,
+                    score: Number(item.score || 0)
+                };
+            })
+            .filter(Boolean);
     }
 
     function renderKnowledgeBase(kbMatches) {
@@ -2307,6 +2719,7 @@
             }
             renderLlmStatus(`向量索引重建完成，共 ${entries.length} 条，使用模型 ${config.embeddingModel}。`);
             updateProgress(entries.length, entries.length);
+            invalidateVectorIndex();
             refreshKnowledgeBaseMatches();
         } catch (error) {
             renderLlmStatus(`向量索引重建失败：${error.message}`);
@@ -2327,10 +2740,21 @@
         );
         let ragMatches = [];
         let queryEmbedding = null;
-        if (config.embeddingModel && KnowledgeBaseEngine.loadEntries().some((entry) => Array.isArray(entry.embedding) && entry.embedding.length)) {
+        const allEntries = KnowledgeBaseEngine.loadEntries();
+        if (config.embeddingModel && allEntries.some((entry) => Array.isArray(entry.embedding) && entry.embedding.length)) {
             const queryText = AIEngine.buildKnowledgeQueryText(state.current);
             queryEmbedding = await LLMClient.embed(config, config.embeddingModel, queryText);
-            ragMatches = KnowledgeBaseEngine.semanticMatchEntries(queryEmbedding, 6);
+            if (state.workers.vector) {
+                try {
+                    ragMatches = await semanticMatchWithWorker(queryEmbedding, allEntries, 6);
+                } catch (error) {
+                    console.warn("[vector-worker-fallback]", error);
+                    ragMatches = KnowledgeBaseEngine.semanticMatchEntries(queryEmbedding, 6);
+                    state.workers.vectorIndexStamp = "";
+                }
+            } else {
+                ragMatches = KnowledgeBaseEngine.semanticMatchEntries(queryEmbedding, 6);
+            }
         }
         const caseMatches = KnowledgeBaseEngine.matchCaseEntries(
             state.current.chart,
@@ -2489,6 +2913,7 @@
         setTimeout(() => {
             loading.classList.add("hidden");
             renderLlmReport(state.current.llmReport || "", state.current.agentReports || {});
+            renderFeedbackHistory();
             $("ai-report").innerHTML = report.map((item) => `<div class="report-block"><h3>${item.title}</h3><p>${item.body}</p></div>`).join("");
             $("environment-analysis").innerHTML = `<div class="report-block"><h3>${environment.title}</h3><p>${environment.body}</p><p class="good-text">这一年可能发生：${currentYearEval.opportunities.join(" ")}</p><p class="bad-text">需要注意：${currentYearEval.risks.join(" ")}</p></div>`;
             $("lucky-suggestions").innerHTML = lucky.map((item) => `<div class="report-block"><p>${item}</p></div>`).join("");
@@ -2690,7 +3115,7 @@
         return rows.length * lineHeight;
     }
 
-    function exportPosterImage() {
+    function exportPosterImageLegacy() {
         const current = ensureReportState();
         if (!current) return;
         const canvas = document.createElement("canvas");
@@ -2813,6 +3238,108 @@
         link.remove();
     }
 
+    function downloadCanvasImage(canvas, filename) {
+        const link = document.createElement("a");
+        link.href = canvas.toDataURL("image/png");
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+    }
+
+    function ensureHtml2Canvas() {
+        if (window.html2canvas) return Promise.resolve(window.html2canvas);
+        if (html2canvasLoader) return html2canvasLoader;
+        html2canvasLoader = new Promise((resolve, reject) => {
+            const script = document.createElement("script");
+            script.src = "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js";
+            script.onload = () => resolve(window.html2canvas);
+            script.onerror = () => reject(new Error("html2canvas 加载失败"));
+            document.head.appendChild(script);
+        });
+        return html2canvasLoader;
+    }
+
+    function buildPosterCaptureNode(current) {
+        let root = $("poster-capture-root");
+        if (!root) {
+            root = document.createElement("div");
+            root.id = "poster-capture-root";
+            root.style.position = "fixed";
+            root.style.left = "-100000px";
+            root.style.top = "0";
+            root.style.width = "1080px";
+            root.style.pointerEvents = "none";
+            root.style.zIndex = "-1";
+            document.body.appendChild(root);
+        }
+        const pillarHtml = current.chart.pillars.map((pillar) => `
+            <div style="border:1px solid rgba(154,52,18,0.22);border-radius:14px;padding:12px;background:rgba(255,255,255,0.92);">
+                <div style="font-size:14px;color:#7a4a25;">${escapeHtml(pillar.label)}</div>
+                <div style="font-size:32px;font-weight:700;color:#1f2937;margin-top:6px;">${escapeHtml(`${pillar.stem}${pillar.branch}`)}</div>
+                <div style="font-size:14px;color:#374151;margin-top:6px;">十神：${escapeHtml(pillar.tenGod)}</div>
+                <div style="font-size:13px;color:#6b7280;margin-top:4px;">藏干：${escapeHtml((pillar.hidden || []).join("、"))}</div>
+            </div>
+        `).join("");
+        const wuxingHtml = Object.entries(current.chart.wuxing || {}).map(([element, value]) => `
+            <div style="display:grid;grid-template-columns:48px 1fr 46px;gap:10px;align-items:center;">
+                <span>${escapeHtml(element)}</span>
+                <div style="height:10px;background:rgba(148,163,184,0.18);border-radius:999px;overflow:hidden;">
+                    <span style="display:block;height:100%;background:${escapeHtml(current.chart.colors[element] || "#9a3412")};width:${Math.min(100, Math.round((value / Math.max(...Object.values(current.chart.wuxing || { 木: 1 }), 0.01)) * 100))}%;"></span>
+                </div>
+                <span style="text-align:right;">${Number(value).toFixed(1)}</span>
+            </div>
+        `).join("");
+        const keyYears = [
+            ...(current.criticalYears?.favorable || []).slice(0, 3).map((item) => `↑ ${item.year}年 ${item.pillar}：${item.reason}`),
+            ...(current.criticalYears?.risky || []).slice(0, 3).map((item) => `! ${item.year}年 ${item.pillar}：${item.reason}`)
+        ];
+        root.innerHTML = `
+            <div style="width:1080px;padding:44px 46px;background:linear-gradient(140deg,#fff7ec 0%,#f3e7d2 100%);font-family:'Noto Serif SC','Songti SC',serif;color:#2f2418;">
+                <h1 style="margin:0 0 8px;font-size:46px;color:#9a3412;">天命 · 八字命盘海报</h1>
+                <p style="margin:0 0 4px;font-size:22px;">档案：${escapeHtml(current.input.profileName || "未命名档案")}</p>
+                <p style="margin:0 0 4px;font-size:16px;color:#4b5563;">排盘时间：${escapeHtml(current.chart.solarMeta.effectiveText)}（${current.chart.solarMeta.usedMode === "trueSolar" ? "真太阳时" : "标准时间"}）</p>
+                <p style="margin:0 0 18px;font-size:16px;color:#4b5563;">出生地：${escapeHtml(current.input.regionName)} · 经度 ${Number(current.input.longitude).toFixed(4)}</p>
+                <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px;">${pillarHtml}</div>
+                <div style="border:1px solid rgba(154,52,18,0.18);border-radius:14px;padding:14px;background:rgba(255,255,255,0.9);margin-bottom:14px;">
+                    <h2 style="margin:0 0 10px;font-size:24px;color:#7a4a25;">五行强弱</h2>
+                    <div style="display:grid;gap:8px;font-size:14px;">${wuxingHtml}</div>
+                </div>
+                <div style="border:1px solid rgba(154,52,18,0.18);border-radius:14px;padding:14px;background:rgba(255,255,255,0.9);margin-bottom:14px;">
+                    <h2 style="margin:0 0 10px;font-size:24px;color:#7a4a25;">核心断语</h2>
+                    <p style="margin:0 0 8px;">总评：${escapeHtml(current.currentYearEval.blunt)}</p>
+                    <p style="margin:0 0 8px;color:#3f6212;">有利：${escapeHtml(joinItems(current.currentYearEval.opportunities))}</p>
+                    <p style="margin:0;color:#991b1b;">风险：${escapeHtml(joinItems(current.currentYearEval.risks))}</p>
+                </div>
+                <div style="border:1px solid rgba(154,52,18,0.18);border-radius:14px;padding:14px;background:rgba(255,255,255,0.9);">
+                    <h2 style="margin:0 0 10px;font-size:24px;color:#7a4a25;">关键年份</h2>
+                    ${(keyYears.length ? keyYears : ["暂无明显极值年份。"]).map((line) => `<p style="margin:0 0 6px;">${escapeHtml(line)}</p>`).join("")}
+                </div>
+            </div>
+        `;
+        return root;
+    }
+
+    async function exportPosterImage() {
+        const current = ensureReportState();
+        if (!current) return;
+        const filename = `${(current.input.profileName || "bazi-poster").replace(/\s+/g, "-")}-poster.png`;
+        try {
+            const html2canvas = await ensureHtml2Canvas();
+            const captureNode = buildPosterCaptureNode(current);
+            const scale = Math.max(2, Math.min(3, window.devicePixelRatio || 1));
+            const canvas = await html2canvas(captureNode, {
+                backgroundColor: "#fff7ec",
+                scale,
+                useCORS: true
+            });
+            downloadCanvasImage(canvas, filename);
+        } catch (error) {
+            console.warn("[poster-export-fallback]", error);
+            exportPosterImageLegacy();
+        }
+    }
+
     function exportMarkdownReport() {
         const content = buildReportMarkdown();
         if (!content) return;
@@ -2849,6 +3376,7 @@
     function resetKnowledgeBase() {
         if (!confirm("恢复后会用内置书目覆盖当前知识库，是否继续？")) return;
         KnowledgeBaseEngine.resetSeed();
+        invalidateVectorIndex();
         refreshKnowledgeBaseMatches();
     }
 
@@ -2861,6 +3389,7 @@
             return;
         }
         KnowledgeBaseEngine.addEntry({ title, tags, content, source: "手动添加" });
+        invalidateVectorIndex();
         $("kb-manual-title").value = "";
         $("kb-manual-tags").value = "";
         $("kb-manual-content").value = "";
@@ -2872,6 +3401,7 @@
         if (!files || !files.length) return;
         try {
             await KnowledgeBaseEngine.importFiles(files);
+            invalidateVectorIndex();
             refreshKnowledgeBaseMatches();
         } catch (error) {
             alert(`导入失败：${error.message}`);
@@ -3185,6 +3715,7 @@
             profiles,
             lifeEvents,
             compatProfiles,
+            feedbackHistory: loadPredictionFeedback(),
             knowledgeEntries: KnowledgeBaseEngine.loadEntries()
         };
         if (window.LocalDB?.available) {
@@ -3208,16 +3739,19 @@
             const profiles = Array.isArray(parsed.profiles) ? parsed.profiles : (parsed.indexedDb?.profiles || []);
             const lifeEvents = Array.isArray(parsed.lifeEvents) ? parsed.lifeEvents : (parsed.indexedDb?.lifeEvents || []);
             const compatProfiles = Array.isArray(parsed.compatProfiles) ? parsed.compatProfiles : (parsed.indexedDb?.compatProfiles || []);
+            const feedbackHistory = Array.isArray(parsed.feedbackHistory) ? parsed.feedbackHistory : (parsed.indexedDb?.kv?.[FEEDBACK_KEY] || []);
             const knowledgeEntries = Array.isArray(parsed.knowledgeEntries) ? parsed.knowledgeEntries : (parsed.indexedDb?.knowledge || []);
             saveAiConfig(aiConfig);
             saveGeoConfig(geoConfig);
+            savePredictionFeedback(feedbackHistory || []);
             if (window.LocalDB?.available) {
                 const payload = parsed.indexedDb
                     ? parsed.indexedDb
                     : {
                         kv: {
                             [AI_CONFIG_KEY]: aiConfig,
-                            [GEO_CONFIG_KEY]: geoConfig
+                            [GEO_CONFIG_KEY]: geoConfig,
+                            [FEEDBACK_KEY]: feedbackHistory || []
                         },
                         profiles: profiles || [],
                         lifeEvents: lifeEvents || [],
@@ -3236,6 +3770,7 @@
             }
             if (Array.isArray(knowledgeEntries)) {
                 KnowledgeBaseEngine.saveEntries(knowledgeEntries);
+                invalidateVectorIndex();
             }
             if (window.LocalDB?.available) {
                 const [profileCount, lifeEventCount, compatCount] = await Promise.all([
@@ -3260,6 +3795,7 @@
             await renderCompatibilityProfiles();
             await renderLifeEvents();
             refreshKnowledgeBaseMatches();
+            renderFeedbackHistory();
             alert("数据恢复完成。");
         } catch (error) {
             alert(`导入失败：${error.message}`);
@@ -3341,6 +3877,7 @@
     async function startApp() {
         await bootstrapStorage();
         await (KnowledgeBaseEngine.ready || Promise.resolve());
+        initWorkers();
         initSelects();
         bindEvents();
         await renderSavedProfiles();
@@ -3348,6 +3885,7 @@
         await renderLifeEvents();
         renderKnowledgeBase([]);
         renderCaseSimilarity([]);
+        renderFeedbackHistory();
         updatePreview(PROFILE_CONFIGS.primary);
         updatePreview(PROFILE_CONFIGS.compat);
     }

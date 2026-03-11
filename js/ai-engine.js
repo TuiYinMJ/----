@@ -361,6 +361,15 @@
                 type: item.type,
                 note: String(item.note || "").slice(0, 120)
             })),
+            feedbackHistory: (state.feedbackHistory || []).slice(-12).map((item) => ({
+                scope: item.scope,
+                verdict: item.verdict,
+                year: item.year || null,
+                month: item.month || null,
+                pillar: item.pillar || "",
+                meta: item.meta || "",
+                summary: String(item.summary || item.note || "").slice(0, 120)
+            })),
             references: buildReferencePayload(references)
         };
     }
@@ -369,7 +378,7 @@
         const payload = buildCorePayload(state, references);
         return [
             { role: "system", content: promptTemplate || DEFAULT_PROMPT_TEMPLATE },
-            { role: "user", content: `请基于以下 JSON 数据生成完整中文分析报告，不要复述“我无法确定”之类的空话。凡引用 references 中内容，必须使用 [引用n] 形式标注 citationId。只围绕 currentYear/currentMonth/extremes/dynamicFacts 的高置信信号展开，避免平庸项堆砌。\n${JSON.stringify(payload, null, 2)}` }
+            { role: "user", content: `请基于以下 JSON 数据生成完整中文分析报告，不要复述“我无法确定”之类的空话。凡引用 references 中内容，必须使用 [引用n] 形式标注 citationId。只围绕 currentYear/currentMonth/extremes/dynamicFacts 的高置信信号展开，避免平庸项堆砌。若 feedbackHistory 中出现“不符合现实”样本，要主动修正同类结论的措辞与置信度。\n${JSON.stringify(payload, null, 2)}` }
         ];
     }
 
