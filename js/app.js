@@ -35,6 +35,13 @@
         { name: "伦敦", longitude: -0.13, timezoneOffset: 0 },
         { name: "自定义", longitude: 120.00, timezoneOffset: 8 }
     ];
+    const GEO_QUICK_HINTS = [
+        "上海市第一妇婴保健院",
+        "北京协和医院",
+        "广州市妇女儿童医疗中心",
+        "成都市妇女儿童中心医院",
+        "杭州市妇产科医院"
+    ];
 
     const PROFILE_CONFIGS = {
         primary: {
@@ -52,6 +59,8 @@
             gender: "gender",
             timezoneOffset: "timezone-offset",
             preview: "datetime-preview",
+            dateTip: "date-validation-tip",
+            timeTip: "time-boundary-tip",
             targetYear: "target-year",
             yunSect: "yun-sect"
         },
@@ -100,8 +109,7 @@
     function defaultGeoConfig() {
         return {
             provider: "none",
-            apiKey: "",
-            query: ""
+            apiKey: ""
         };
     }
 
@@ -171,6 +179,27 @@
             if (!items.length) return "";
             return `<optgroup label="${label}">${items.map(({ region, index }) => `<option value="${index}">${region.name}</option>`).join("")}</optgroup>`;
         }).join("");
+    }
+
+    function renderGeoSuggestions() {
+        const datalist = $("geo-suggestions");
+        if (!datalist) return;
+        const options = [
+            ...REGIONS.map((region) => region.name).filter((name) => name !== "自定义"),
+            ...GEO_QUICK_HINTS
+        ];
+        datalist.innerHTML = options.map((item) => `<option value="${escapeHtml(item)}"></option>`).join("");
+    }
+
+    function setInputTip(id, message, level = "muted") {
+        const node = $(id);
+        if (!node) return;
+        node.className = "input-tip";
+        if (level === "warn") node.classList.add("tip-warn");
+        if (level === "error") node.classList.add("tip-error");
+        if (level === "ok") node.classList.add("tip-ok");
+        if (level === "muted") node.classList.add("muted");
+        node.textContent = message;
     }
 
     function lunarMonthLabel(month) {
@@ -315,6 +344,7 @@
         initProfileControls(PROFILE_CONFIGS.primary, new Date().getFullYear() - 30, 6, 18, 0);
         initProfileControls(PROFILE_CONFIGS.compat, new Date().getFullYear() - 28, 10, 9, 0);
         fillSelect(PROFILE_CONFIGS.primary.targetYear, 1900, 2099, new Date().getFullYear());
+        renderGeoSuggestions();
         renderAiConfig(loadAiConfig());
         renderGeoConfig(loadGeoConfig());
     }
@@ -356,19 +386,31 @@
     function renderGeoConfig(config) {
         $("geo-provider").value = config.provider || "none";
         $("geo-api-key").value = config.apiKey || "";
-        $("geo-query").value = config.query || "";
     }
 
     function getGeoConfigFromForm() {
         return {
             provider: $("geo-provider").value,
-            apiKey: $("geo-api-key").value.trim(),
-            query: $("geo-query").value.trim()
+            apiKey: $("geo-api-key").value.trim()
         };
     }
 
     function persistGeoConfigFromForm() {
         saveGeoConfig(getGeoConfigFromForm());
+    }
+
+    function openSettingsModal() {
+        const modal = $("settings-modal");
+        if (!modal) return;
+        modal.classList.remove("hidden");
+        modal.setAttribute("aria-hidden", "false");
+    }
+
+    function closeSettingsModal() {
+        const modal = $("settings-modal");
+        if (!modal) return;
+        modal.classList.add("hidden");
+        modal.setAttribute("aria-hidden", "true");
     }
 
     function bindEvents() {
@@ -396,14 +438,29 @@
         $("btn-kb-add").addEventListener("click", addKnowledgeBaseEntry);
         $("kb-file-input").addEventListener("change", importKnowledgeBaseFiles);
         $("btn-geo-search").addEventListener("click", geocodeBirthPlace);
+        $("btn-open-settings").addEventListener("click", openSettingsModal);
+        $("btn-close-settings").addEventListener("click", closeSettingsModal);
+        $("btn-save-settings").addEventListener("click", () => {
+            persistGeoConfigFromForm();
+            closeSettingsModal();
+            setInputTip("geo-status", "系统设置已保存。现在可直接在出生地输入框搜索定位。", "ok");
+        });
+        document.querySelectorAll("[data-close-settings]").forEach((node) => {
+            node.addEventListener("click", closeSettingsModal);
+        });
+        document.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") closeSettingsModal();
+        });
         ["llm-provider", "llm-workflow-mode", "llm-base-url", "llm-api-key", "llm-model", "embedding-model", "llm-prompt-template"].forEach((id) => {
             $(id).addEventListener("change", persistAiConfigFromForm);
             $(id).addEventListener("input", persistAiConfigFromForm);
         });
-        ["geo-provider", "geo-api-key", "geo-query"].forEach((id) => {
+        ["geo-provider", "geo-api-key"].forEach((id) => {
             $(id).addEventListener("change", persistGeoConfigFromForm);
             $(id).addEventListener("input", persistGeoConfigFromForm);
         });
+        $("geo-query").addEventListener("change", () => updatePreview(PROFILE_CONFIGS.primary));
+        $("geo-query").addEventListener("input", () => updatePreview(PROFILE_CONFIGS.primary));
         bindProfileEvents(PROFILE_CONFIGS.primary);
         bindProfileEvents(PROFILE_CONFIGS.compat);
         $(PROFILE_CONFIGS.compat.enabled).addEventListener("change", () => {
@@ -495,8 +552,14 @@
     }
 
     function applyRegion(config, region) {
-        $(config.longitude).value = region.longitude.toFixed(2);
+        $(config.longitude).value = region.longitude.toFixed(4);
         $(config.timezoneOffset).value = String(region.timezoneOffset);
+    }
+
+    function guessRegionFromQuery(query) {
+        const text = String(query || "").trim();
+        if (!text) return null;
+        return REGIONS.find((region) => region.name !== "自定义" && text.includes(region.name)) || null;
     }
 
     async function geocodeByAmap(query, apiKey) {
@@ -545,37 +608,43 @@
 
     async function geocodeBirthPlace() {
         const config = getGeoConfigFromForm();
+        const query = $("geo-query").value.trim();
         persistGeoConfigFromForm();
+        if (!query) {
+            setInputTip("geo-status", "请先输入出生市/县/医院。", "error");
+            return;
+        }
+        const guessedRegion = guessRegionFromQuery(query);
         if (config.provider === "none") {
-            $("geo-status").innerHTML = "未启用地图接口。你可以直接手填经度，或选择高德/腾讯后再检索。";
+            if (!guessedRegion) {
+                setInputTip("geo-status", "当前未启用地图接口，未能从关键词匹配城市。请打开“系统设置”填写地图接口后再定位。", "warn");
+                return;
+            }
+            const primary = PROFILE_CONFIGS.primary;
+            const index = REGIONS.findIndex((item) => item.name === guessedRegion.name);
+            $(primary.region).value = String(Math.max(index, 0));
+            applyRegion(primary, guessedRegion);
+            updatePreview(primary);
+            setInputTip("geo-status", `📍 已定位：${guessedRegion.name}（使用内置城市库，经度 ${guessedRegion.longitude.toFixed(2)}，真太阳时已自动校准）`, "ok");
             return;
         }
         if (!config.apiKey) {
-            $("geo-status").innerHTML = `<span class="bad-text">请先填写地图 API Key。</span>`;
-            return;
-        }
-        if (!config.query) {
-            $("geo-status").innerHTML = `<span class="bad-text">请先输入出生医院或县市地址。</span>`;
+            setInputTip("geo-status", "请先在“系统设置”填写地图 API Key。", "error");
             return;
         }
         try {
-            $("geo-status").innerHTML = "正在检索地址并换算经纬度...";
+            setInputTip("geo-status", "正在检索地址并校准真太阳时...", "muted");
             const result = config.provider === "amap"
-                ? await geocodeByAmap(config.query, config.apiKey)
-                : await geocodeByTencent(config.query, config.apiKey);
+                ? await geocodeByAmap(query, config.apiKey)
+                : await geocodeByTencent(query, config.apiKey);
             const customIndex = REGIONS.findIndex((item) => item.name === "自定义");
             const primary = PROFILE_CONFIGS.primary;
             $(primary.region).value = String(Math.max(customIndex, 0));
             $(primary.longitude).value = result.longitude.toFixed(4);
-            $("geo-status").innerHTML = [
-                `<div class="preview-line"><span>定位接口</span><strong>${result.provider}</strong></div>`,
-                `<div class="preview-line"><span>解析结果</span><strong>${escapeHtml(result.title)}</strong></div>`,
-                `<div class="preview-line"><span>坐标</span><strong>经度 ${result.longitude.toFixed(4)} / 纬度 ${result.latitude.toFixed(4)}</strong></div>`,
-                `<div class="preview-line"><span>说明</span><strong>${escapeHtml(result.detail || "已写入经度，真太阳时将按此经度重算。")}</strong></div>`
-            ].join("");
             updatePreview(primary);
+            setInputTip("geo-status", `📍 已定位：${result.title}（经度 ${result.longitude.toFixed(4)}，真太阳时已自动校准）`, "ok");
         } catch (error) {
-            $("geo-status").innerHTML = `<span class="bad-text">定位失败：${escapeHtml(error.message)}。若目标服务禁止浏览器跨域，请改为手填经度或自建本地代理。</span>`;
+            setInputTip("geo-status", `定位失败：${error.message}。若接口限制跨域，可在高级排盘里手动微调经度。`, "error");
         }
     }
 
@@ -603,13 +672,26 @@
             }
             maxDay = lunarMonthInfo ? lunarMonthInfo.getDayCount() : 30;
         }
+        const adjusted = previous > maxDay;
+        const adjustedTo = Math.min(previous, maxDay);
         dayEl.innerHTML = "";
         for (let i = 1; i <= maxDay; i++) {
             const option = document.createElement("option");
             option.value = i;
             option.textContent = i;
-            if (i === Math.min(previous, maxDay)) option.selected = true;
+            if (i === adjustedTo) option.selected = true;
             dayEl.appendChild(option);
+        }
+        if (config.dateTip) {
+            if (calendarType === "lunar" && adjusted) {
+                setInputTip(config.dateTip, `该农历月为小月，无 ${previous} 日，已自动调整为 ${adjustedTo} 日。`, "error");
+            } else if (calendarType === "lunar") {
+                setInputTip(config.dateTip, maxDay === 29
+                    ? "该农历月为小月（29天），系统已按规则限制日期。"
+                    : "该农历月为大月（30天），可正常选择 1-30 日。", "muted");
+            } else {
+                setInputTip(config.dateTip, "当前为公历录入，日期会按公历每月天数自动联动校验。", "muted");
+            }
         }
     }
 
@@ -628,6 +710,35 @@
             return { valid: false, leapMonth, message: `你选择了闰月，但 ${input.year} 年只有闰${leapMonth}月，没有闰${input.month}月。` };
         }
         return { valid: true, leapMonth };
+    }
+
+    function renderTemporalSensitivityTip(config, input) {
+        if (!config.timeTip) return;
+        try {
+            const chart = BaziCore.computeBaZi(input);
+            const jie = chart.seasonal?.jieQi;
+            if (!jie) {
+                setInputTip(config.timeTip, "未获取到节气边界数据。", "muted");
+                return;
+            }
+            const afterPrev = Math.abs(Number(jie.passedMinutes || 0));
+            const beforeNext = Math.abs(Number(jie.remainingMinutes || 0));
+            const nearest = Math.min(afterPrev, beforeNext);
+            if (!Number.isFinite(nearest)) {
+                setInputTip(config.timeTip, "未获取到节气边界数据。", "muted");
+                return;
+            }
+            if (nearest <= 180) {
+                const nearName = afterPrev <= beforeNext ? jie.prevName : jie.nextName;
+                const direction = afterPrev <= beforeNext ? "后" : "前";
+                const level = nearest <= 60 ? "error" : "warn";
+                setInputTip(config.timeTip, `此时间距离「${nearName}」交节仅差 ${Math.round(nearest)} 分钟（${direction}），排盘结果敏感，请确保出生时间准确。`, level);
+                return;
+            }
+            setInputTip(config.timeTip, `节气边界正常：距离上一/下一节气分别约 ${Math.round(afterPrev)} 分钟 / ${Math.round(beforeNext)} 分钟。`, "ok");
+        } catch {
+            setInputTip(config.timeTip, "节气敏感度提示暂不可用，请检查录入时间。", "warn");
+        }
     }
 
     function getTimeParts(config) {
@@ -670,8 +781,10 @@
             const leapValidation = validateLunarLeapChoice(input);
             if (!leapValidation.valid) {
                 $(config.preview).innerHTML = `<p class="muted">${escapeHtml(leapValidation.message)} 请先修正闰月选项。</p>`;
+                if (config.timeTip) setInputTip(config.timeTip, "请先修正日期后再判断节气边界。", "warn");
                 return;
             }
+            renderTemporalSensitivityTip(config, input);
             const preview = BaziCore.buildPreview(input);
             const recommendation = preview.solarMeta.autoUseTrueSolar
                 ? "自动模式建议采用真太阳时，因为修正后会影响时柱或日期。"
@@ -707,6 +820,7 @@
             `;
         } catch (error) {
             $(config.preview).innerHTML = `<p class="muted">当前输入无法换算，请检查日期、闰月或时间：${error.message}</p>`;
+            if (config.timeTip) setInputTip(config.timeTip, "当前时间无法完成节气边界计算，请检查输入。", "warn");
         }
     }
 
@@ -1829,6 +1943,7 @@
         const config = PROFILE_CONFIGS.compat;
         $(config.name).value = "合盘对象示例";
         $(config.calendarType).value = "solar";
+        $(config.calendarType).dataset.prevType = "solar";
         $(config.year).value = "1994";
         $(config.month).value = "11";
         syncLunarLeap(config);
@@ -1848,6 +1963,7 @@
         const config = PROFILE_CONFIGS.primary;
         $(config.name).value = "示例命盘";
         $(config.calendarType).value = "solar";
+        $(config.calendarType).dataset.prevType = "solar";
         $(config.year).value = "1992";
         $(config.month).value = "8";
         syncLunarLeap(config);
@@ -1917,6 +2033,7 @@
     function applyInput(config, input, name) {
         $(config.name).value = name || input.profileName || "";
         $(config.calendarType).value = input.calendarType || "solar";
+        $(config.calendarType).dataset.prevType = $(config.calendarType).value;
         $(config.year).value = String(input.year);
         renderMonthOptions(config);
         setMonthSelection(config, Math.abs(input.month), Boolean(input.lunarLeap));
@@ -1927,7 +2044,7 @@
         $(config.gender).value = input.gender;
         $(config.solarTimeMode).value = input.solarTimeMode || "auto";
         $(config.timezoneOffset).value = String(input.timezoneOffset ?? 8);
-        $(config.longitude).value = Number(input.longitude).toFixed(2);
+        $(config.longitude).value = Number(input.longitude).toFixed(4);
         $(config.dayBoundarySect).value = String(input.dayBoundarySect || 1);
         if (config.targetYear) $(config.targetYear).value = String(input.targetYear || new Date().getFullYear());
         if (config.yunSect) $(config.yunSect).value = String(input.yunSect || 2);
