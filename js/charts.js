@@ -149,6 +149,8 @@
         const padding = 54;
         const min = 35;
         const max = 95;
+        const pointPositions = [];
+        const markerPositions = [];
         ctx.clearRect(0, 0, width, height);
         ctx.strokeStyle = "rgba(89,58,28,0.14)";
         ctx.lineWidth = 1;
@@ -172,21 +174,32 @@
         points.forEach((item, index) => {
             const x = padding + ((width - padding * 2) / Math.max(points.length - 1, 1)) * index;
             const y = height - padding - ((item.value - min) / (max - min)) * (height - padding * 2);
+            pointPositions.push({ ...item, index, x, y });
             ctx.fillStyle = "rgba(154,52,18,0.78)";
             ctx.beginPath();
             ctx.arc(x, y, 2.8, 0, Math.PI * 2);
             ctx.fill();
             if (index % 4 === 0) {
                 ctx.fillStyle = "#78624b";
-                ctx.font = "11px sans-serif";
+                ctx.font = "12px sans-serif";
                 ctx.fillText(String(item.age), x - 8, height - 20);
             }
         });
         markers.forEach((marker) => {
             const index = marker.index;
             if (index < 0 || index >= points.length) return;
-            const x = padding + ((width - padding * 2) / Math.max(points.length - 1, 1)) * index;
-            const y = height - padding - ((points[index].value - min) / (max - min)) * (height - padding * 2);
+            const baseX = padding + ((width - padding * 2) / Math.max(points.length - 1, 1)) * index;
+            const baseY = height - padding - ((points[index].value - min) / (max - min)) * (height - padding * 2);
+            const x = baseX + (marker.offsetX || 0);
+            const y = baseY + (marker.offsetY || 0);
+            markerPositions.push({
+                ...marker,
+                x,
+                y,
+                age: points[index].age,
+                year: points[index].year,
+                score: points[index].value
+            });
             ctx.fillStyle = marker.type === "wealth"
                 ? "#b45309"
                 : marker.type === "relation"
@@ -198,9 +211,15 @@
             ctx.arc(x, y, 5.6, 0, Math.PI * 2);
             ctx.fill();
             ctx.fillStyle = "#fff";
-            ctx.font = "10px sans-serif";
+            ctx.font = "12px sans-serif";
             ctx.fillText(marker.symbol || "!", x - 3, y + 3);
         });
+        return {
+            width,
+            height,
+            pointPositions,
+            markerPositions
+        };
     }
 
     window.ChartRenderer = {

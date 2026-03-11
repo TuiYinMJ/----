@@ -1,5 +1,6 @@
 (function () {
     const STORAGE_KEY = "tming-bazi-profiles-v4";
+    const COMPAT_STORAGE_KEY = "tming-compat-profiles-v1";
     const AI_CONFIG_KEY = "tming-ai-config-v1";
     const GEO_CONFIG_KEY = "tming-geo-config-v1";
     const LIFE_EVENT_KEY = "tming-life-events-v1";
@@ -84,7 +85,20 @@
         }
     };
 
-    const state = { current: null, ai: null, inputStep: 1, calendarSelection: { year: null, month: null, selectedDate: null } };
+    const state = {
+        current: null,
+        ai: null,
+        calendarSelection: { year: null, month: null, selectedDate: null },
+        storage: {
+            aiConfig: null,
+            geoConfig: null
+        },
+        paging: {
+            profiles: { page: 1, pageSize: 12, total: 0 },
+            lifeEvents: { page: 1, pageSize: 8, total: 0 },
+            compatProfiles: { page: 1, pageSize: 10, total: 0 }
+        }
+    };
     const TRUE_SOLAR_GROUPS = {
         high: "建议重点核对真太阳时（偏差 >= 40 分钟）",
         low: "通常标准时即可（偏差 < 40 分钟）",
@@ -115,45 +129,141 @@
         };
     }
 
-    function loadAiConfig() {
+    function safeParse(json, fallback) {
         try {
-            return { ...defaultAiConfig(), ...(JSON.parse(localStorage.getItem(AI_CONFIG_KEY) || "null") || {}) };
+            const parsed = JSON.parse(json || "null");
+            return parsed == null ? fallback : parsed;
         } catch {
-            return defaultAiConfig();
+            return fallback;
         }
+    }
+
+    function loadAiConfig() {
+        if (state.storage.aiConfig) return { ...defaultAiConfig(), ...state.storage.aiConfig };
+        const local = safeParse(localStorage.getItem(AI_CONFIG_KEY), {});
+        return { ...defaultAiConfig(), ...(local || {}) };
     }
 
     function saveAiConfig(config) {
         state.ai = { ...defaultAiConfig(), ...config };
+        state.storage.aiConfig = state.ai;
         localStorage.setItem(AI_CONFIG_KEY, JSON.stringify(state.ai));
+        if (window.LocalDB?.available) {
+            window.LocalDB.setKv(AI_CONFIG_KEY, state.ai).catch(() => {});
+        }
         return state.ai;
     }
 
     function loadGeoConfig() {
-        try {
-            return { ...defaultGeoConfig(), ...(JSON.parse(localStorage.getItem(GEO_CONFIG_KEY) || "null") || {}) };
-        } catch {
-            return defaultGeoConfig();
-        }
+        if (state.storage.geoConfig) return { ...defaultGeoConfig(), ...state.storage.geoConfig };
+        const local = safeParse(localStorage.getItem(GEO_CONFIG_KEY), {});
+        return { ...defaultGeoConfig(), ...(local || {}) };
     }
 
     function saveGeoConfig(config) {
         const merged = { ...defaultGeoConfig(), ...config };
+        state.storage.geoConfig = merged;
         localStorage.setItem(GEO_CONFIG_KEY, JSON.stringify(merged));
+        if (window.LocalDB?.available) {
+            window.LocalDB.setKv(GEO_CONFIG_KEY, merged).catch(() => {});
+        }
         return merged;
     }
 
     function loadLifeEvents() {
-        try {
-            const rows = JSON.parse(localStorage.getItem(LIFE_EVENT_KEY) || "[]");
-            return Array.isArray(rows) ? rows.filter((item) => item && item.id && item.year && item.type && item.note) : [];
-        } catch {
-            return [];
-        }
+        const rows = safeParse(localStorage.getItem(LIFE_EVENT_KEY), []);
+        return Array.isArray(rows) ? rows.filter((item) => item && item.id && item.year && item.type && item.note) : [];
     }
 
     function saveLifeEvents(events) {
-        localStorage.setItem(LIFE_EVENT_KEY, JSON.stringify((events || []).slice(0, 120)));
+        const safe = (events || []).slice(0, 120);
+        localStorage.setItem(LIFE_EVENT_KEY, JSON.stringify(safe));
+    }
+
+    function loadProfiles() {
+        const rows = safeParse(localStorage.getItem(STORAGE_KEY), []);
+        return Array.isArray(rows) ? rows : [];
+    }
+
+    function saveProfiles(profiles) {
+        const safe = (profiles || []).slice(0, 200);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(safe));
+        return safe;
+    }
+
+    function loadCompatProfiles() {
+        const rows = safeParse(localStorage.getItem(COMPAT_STORAGE_KEY), []);
+        return Array.isArray(rows) ? rows : [];
+    }
+
+    function saveCompatProfiles(profiles) {
+        const safe = (profiles || []).slice(0, 240);
+        localStorage.setItem(COMPAT_STORAGE_KEY, JSON.stringify(safe));
+        return safe;
+    }
+
+    async function bootstrapStorage() {
+        const localProfiles = Array.isArray(safeParse(localStorage.getItem(STORAGE_KEY), []))
+            ? safeParse(localStorage.getItem(STORAGE_KEY), [])
+            : [];
+        const localLifeEvents = Array.isArray(safeParse(localStorage.getItem(LIFE_EVENT_KEY), []))
+            ? safeParse(localStorage.getItem(LIFE_EVENT_KEY), [])
+            : [];
+        const localCompatProfiles = Array.isArray(safeParse(localStorage.getItem(COMPAT_STORAGE_KEY), []))
+            ? safeParse(localStorage.getItem(COMPAT_STORAGE_KEY), [])
+            : [];
+        state.storage.aiConfig = { ...defaultAiConfig(), ...(safeParse(localStorage.getItem(AI_CONFIG_KEY), {}) || {}) };
+        state.storage.geoConfig = { ...defaultGeoConfig(), ...(safeParse(localStorage.getItem(GEO_CONFIG_KEY), {}) || {}) };
+        state.paging.profiles.total = localProfiles.length;
+        state.paging.lifeEvents.total = localLifeEvents.length;
+        state.paging.compatProfiles.total = localCompatProfiles.length;
+        if (!window.LocalDB?.available) return;
+        await window.LocalDB.ready;
+        const [dbAi, dbGeo, profileCount, lifeEventCount, compatCount] = await Promise.all([
+            window.LocalDB.getKv(AI_CONFIG_KEY),
+            window.LocalDB.getKv(GEO_CONFIG_KEY),
+            window.LocalDB.countProfiles(),
+            window.LocalDB.countLifeEvents(),
+            window.LocalDB.countCompatProfiles()
+        ]);
+        if (dbAi) state.storage.aiConfig = { ...defaultAiConfig(), ...(dbAi || {}) };
+        else await window.LocalDB.setKv(AI_CONFIG_KEY, state.storage.aiConfig);
+        if (dbGeo) state.storage.geoConfig = { ...defaultGeoConfig(), ...(dbGeo || {}) };
+        else await window.LocalDB.setKv(GEO_CONFIG_KEY, state.storage.geoConfig);
+        if (!profileCount && localProfiles.length) await window.LocalDB.replaceProfiles(localProfiles);
+        if (!lifeEventCount && localLifeEvents.length) await window.LocalDB.replaceLifeEvents(localLifeEvents);
+        if (!compatCount && localCompatProfiles.length) await window.LocalDB.replaceCompatProfiles(localCompatProfiles);
+        state.paging.profiles.total = profileCount || localProfiles.length;
+        state.paging.lifeEvents.total = lifeEventCount || localLifeEvents.length;
+        state.paging.compatProfiles.total = compatCount || localCompatProfiles.length;
+    }
+
+    function getLocalPagedRows(rows, page, pageSize) {
+        const safeRows = Array.isArray(rows) ? rows : [];
+        const safePageSize = Math.max(1, Number(pageSize || 10));
+        const total = safeRows.length;
+        const totalPages = Math.max(1, Math.ceil(total / safePageSize));
+        const safePage = Math.min(totalPages, Math.max(1, Number(page || 1)));
+        const offset = (safePage - 1) * safePageSize;
+        return {
+            rows: safeRows.slice(offset, offset + safePageSize),
+            total,
+            page: safePage,
+            totalPages
+        };
+    }
+
+    function updatePager(scope, infoId, prevId, nextId) {
+        const pager = state.paging[scope];
+        if (!pager) return;
+        const totalPages = Math.max(1, Math.ceil((pager.total || 0) / pager.pageSize));
+        pager.page = Math.min(totalPages, Math.max(1, Number(pager.page || 1)));
+        const infoNode = $(infoId);
+        if (infoNode) infoNode.textContent = `第 ${pager.page} / ${totalPages} 页 · 共 ${pager.total || 0} 条`;
+        const prevBtn = $(prevId);
+        const nextBtn = $(nextId);
+        if (prevBtn) prevBtn.disabled = pager.page <= 1;
+        if (nextBtn) nextBtn.disabled = pager.page >= totalPages;
     }
 
     function pad(value) {
@@ -206,7 +316,7 @@
         datalist.innerHTML = options.map((item) => `<option value="${escapeHtml(item)}"></option>`).join("");
     }
 
-    function setInputTip(id, message, level = "muted") {
+    function setInputTip(id, message, level = "muted", options = {}) {
         const node = $(id);
         if (!node) return;
         node.className = "input-tip";
@@ -214,6 +324,14 @@
         if (level === "error") node.classList.add("tip-error");
         if (level === "ok") node.classList.add("tip-ok");
         if (level === "muted") node.classList.add("muted");
+        if (options.allowHtml) {
+            node.innerHTML = message;
+            if (options.withSettingsLink) {
+                const trigger = node.querySelector("[data-open-settings]");
+                if (trigger) trigger.addEventListener("click", openSettingsModal);
+            }
+            return;
+        }
         node.textContent = message;
     }
 
@@ -313,6 +431,7 @@
         const selection = getMonthSelection(config);
         const rawInput = {
             profileName: $(config.name).value.trim() || (config === PROFILE_CONFIGS.primary ? "未命名档案" : "合盘对象"),
+            profileGroup: config === PROFILE_CONFIGS.primary ? $("profile-group").value.trim() : "",
             calendarType: previousType,
             year: Number($(config.year).value),
             month: selection.month,
@@ -400,7 +519,8 @@
     }
 
     function renderLlmStatus(message) {
-        $("llm-status").innerHTML = `<p>${message}</p>`;
+        const safe = escapeHtml(String(message || "")).replace(/\n/g, "<br>");
+        $("llm-status").innerHTML = `<p>${safe}</p>`;
     }
 
     function renderGeoConfig(config) {
@@ -433,17 +553,6 @@
         modal.setAttribute("aria-hidden", "true");
     }
 
-    function setInputStep(step) {
-        const safeStep = step === 2 ? 2 : 1;
-        state.inputStep = safeStep;
-        document.querySelectorAll("[data-step-panel]").forEach((panel) => {
-            panel.classList.toggle("active", Number(panel.dataset.stepPanel) === safeStep);
-        });
-        document.querySelectorAll("[data-step-to]").forEach((chip) => {
-            chip.classList.toggle("active", Number(chip.dataset.stepTo) === safeStep);
-        });
-    }
-
     function bindEvents() {
         let resizeTimer = null;
         document.querySelectorAll(".nav-links a").forEach((link) => {
@@ -456,12 +565,47 @@
         $("compat-form").addEventListener("submit", (event) => event.preventDefault());
         $("btn-example").addEventListener("click", loadExample);
         $("btn-compat-example").addEventListener("click", loadCompatibilityExample);
+        $("btn-save-compat-profile").addEventListener("click", saveCurrentCompatibilityProfile);
         $("btn-save").addEventListener("click", saveCurrentProfile);
         $("btn-clear-storage").addEventListener("click", clearProfiles);
+        $("profile-group-filter").addEventListener("change", () => {
+            state.paging.profiles.page = 1;
+            renderSavedProfiles();
+        });
+        $("btn-profiles-prev").addEventListener("click", () => {
+            state.paging.profiles.page = Math.max(1, state.paging.profiles.page - 1);
+            renderSavedProfiles();
+        });
+        $("btn-profiles-next").addEventListener("click", () => {
+            state.paging.profiles.page += 1;
+            renderSavedProfiles();
+        });
+        $("btn-life-events-prev").addEventListener("click", () => {
+            state.paging.lifeEvents.page = Math.max(1, state.paging.lifeEvents.page - 1);
+            renderLifeEvents();
+        });
+        $("btn-life-events-next").addEventListener("click", () => {
+            state.paging.lifeEvents.page += 1;
+            renderLifeEvents();
+        });
+        $("btn-compat-profiles-prev").addEventListener("click", () => {
+            state.paging.compatProfiles.page = Math.max(1, state.paging.compatProfiles.page - 1);
+            renderCompatibilityProfiles();
+        });
+        $("btn-compat-profiles-next").addEventListener("click", () => {
+            state.paging.compatProfiles.page += 1;
+            renderCompatibilityProfiles();
+        });
+        $("btn-export-all-data").addEventListener("click", exportAllData);
+        $("btn-import-all-data").addEventListener("click", () => $("all-data-file").click());
+        $("all-data-file").addEventListener("change", importAllDataFile);
         $("btn-export-markdown").addEventListener("click", exportMarkdownReport);
         $("btn-export-html").addEventListener("click", exportHtmlReport);
         $("btn-print-report").addEventListener("click", printReport);
         $("btn-export-poster").addEventListener("click", exportPosterImage);
+        $("btn-scroll-top").addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+        $("btn-float-export").addEventListener("click", exportMarkdownReport);
+        $("btn-float-print").addEventListener("click", printReport);
         $("btn-llm-models").addEventListener("click", refreshLlmModels);
         $("btn-llm-generate").addEventListener("click", generateLlmReport);
         $("btn-kb-reindex").addEventListener("click", rebuildKnowledgeVectors);
@@ -473,12 +617,8 @@
         $("btn-geo-search").addEventListener("click", geocodeBirthPlace);
         $("btn-open-settings").addEventListener("click", openSettingsModal);
         $("btn-close-settings").addEventListener("click", closeSettingsModal);
-        $("btn-step-next").addEventListener("click", () => setInputStep(2));
-        $("btn-step-prev").addEventListener("click", () => setInputStep(1));
-        document.querySelectorAll("[data-step-to]").forEach((node) => {
-            node.addEventListener("click", () => setInputStep(Number(node.dataset.stepTo)));
-        });
         $("btn-life-event-add").addEventListener("click", addLifeEventFromForm);
+        $("btn-reverse-search").addEventListener("click", runReverseLookup);
         $("daily-calendar-year").addEventListener("change", renderDailyCalendar);
         $("daily-calendar-month").addEventListener("change", renderDailyCalendar);
         $("btn-save-settings").addEventListener("click", () => {
@@ -570,6 +710,11 @@
         document.querySelectorAll(".section").forEach((node) => node.classList.remove("active"));
         document.querySelector(`#section-${section}`).classList.add("active");
         document.querySelectorAll(".nav-links a").forEach((node) => node.classList.toggle("active", node.dataset.section === section));
+        if (state.current) {
+            window.requestAnimationFrame(() => {
+                renderAll();
+            });
+        }
     }
 
     function setCompatibilityEnabled(enabled) {
@@ -589,7 +734,9 @@
             config.dayBoundarySect,
             config.gender,
             config.timezoneOffset,
-            "btn-compat-example"
+            "compat-mode",
+            "btn-compat-example",
+            "btn-save-compat-profile"
         ].forEach((id) => {
             $(id).disabled = !enabled;
         });
@@ -664,7 +811,12 @@
         const guessedRegion = guessRegionFromQuery(query);
         if (config.provider === "none") {
             if (!guessedRegion) {
-                setInputTip("geo-status", "当前未启用地图接口，未能从关键词匹配城市。请打开“系统设置”填写地图接口后再定位。", "warn");
+                setInputTip(
+                    "geo-status",
+                    "当前未启用地图接口，未能从关键词匹配城市。<button type=\"button\" class=\"tip-action\" data-open-settings=\"1\">前往配置 API Key</button>",
+                    "warn",
+                    { allowHtml: true, withSettingsLink: true }
+                );
                 return;
             }
             const primary = PROFILE_CONFIGS.primary;
@@ -676,7 +828,12 @@
             return;
         }
         if (!config.apiKey) {
-            setInputTip("geo-status", "请先在“系统设置”填写地图 API Key。", "error");
+            setInputTip(
+                "geo-status",
+                "请先填写地图 API Key。<button type=\"button\" class=\"tip-action\" data-open-settings=\"1\">前往配置 API Key</button>",
+                "error",
+                { allowHtml: true, withSettingsLink: true }
+            );
             return;
         }
         try {
@@ -691,7 +848,12 @@
             updatePreview(primary);
             setInputTip("geo-status", `📍 已定位：${result.title}（经度 ${result.longitude.toFixed(4)}，真太阳时已自动校准）`, "ok");
         } catch (error) {
-            setInputTip("geo-status", `定位失败：${error.message}。若接口限制跨域，可在高级排盘里手动微调经度。`, "error");
+            setInputTip(
+                "geo-status",
+                `定位失败：${escapeHtml(error.message)}。若接口限制跨域，可手动微调经度，或 <button type="button" class="tip-action" data-open-settings="1">前往配置 API Key</button>。`,
+                "error",
+                { allowHtml: true, withSettingsLink: true }
+            );
         }
     }
 
@@ -706,8 +868,28 @@
         }[type] || type;
     }
 
-    function renderLifeEvents() {
-        const events = loadLifeEvents().sort((a, b) => a.year - b.year);
+    async function queryLifeEventsPage() {
+        const pager = state.paging.lifeEvents;
+        const offset = (pager.page - 1) * pager.pageSize;
+        if (window.LocalDB?.available) {
+            const pageResult = await window.LocalDB.listLifeEventsPage({ offset, limit: pager.pageSize });
+            pager.total = pageResult.total || 0;
+            if (!pageResult.rows?.length && pager.total > 0 && pager.page > 1) {
+                pager.page = Math.max(1, Math.ceil(pager.total / pager.pageSize));
+                return queryLifeEventsPage();
+            }
+            const rows = (pageResult.rows || []).slice().sort((a, b) => Number(a.year || 0) - Number(b.year || 0));
+            return rows;
+        }
+        const all = loadLifeEvents().slice().sort((a, b) => Number(a.year || 0) - Number(b.year || 0));
+        const pageResult = getLocalPagedRows(all, pager.page, pager.pageSize);
+        pager.total = pageResult.total;
+        pager.page = pageResult.page;
+        return pageResult.rows;
+    }
+
+    async function renderLifeEvents() {
+        const events = await queryLifeEventsPage();
         const container = $("life-events-list");
         if (!container) return;
         container.innerHTML = events.length
@@ -722,16 +904,20 @@
         container.querySelectorAll("[data-life-event-remove]").forEach((node) => {
             node.addEventListener("click", () => removeLifeEvent(node.dataset.lifeEventRemove));
         });
+        updatePager("lifeEvents", "life-events-page-info", "btn-life-events-prev", "btn-life-events-next");
     }
 
-    function removeLifeEvent(id) {
+    async function removeLifeEvent(id) {
         const next = loadLifeEvents().filter((item) => String(item.id) !== String(id));
         saveLifeEvents(next);
-        renderLifeEvents();
+        if (window.LocalDB?.available) {
+            await window.LocalDB.removeLifeEvent(id);
+        }
+        await renderLifeEvents();
         if (state.current) state.current.lifeEvents = next;
     }
 
-    function addLifeEventFromForm() {
+    async function addLifeEventFromForm() {
         const year = Number($("life-event-year").value);
         const type = $("life-event-type").value;
         const note = $("life-event-note").value.trim();
@@ -739,16 +925,26 @@
             alert("请先填写事件描述。");
             return;
         }
-        const events = loadLifeEvents();
-        events.push({
+        const entry = {
             id: `evt-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
             year,
             type,
             note
-        });
+        };
+        const events = loadLifeEvents();
+        events.push(entry);
         saveLifeEvents(events);
+        if (window.LocalDB?.available) {
+            await window.LocalDB.upsertLifeEvent(entry);
+            const total = await window.LocalDB.countLifeEvents();
+            state.paging.lifeEvents.total = total;
+            state.paging.lifeEvents.page = Math.max(1, Math.ceil(total / state.paging.lifeEvents.pageSize));
+        } else {
+            state.paging.lifeEvents.total = events.length;
+            state.paging.lifeEvents.page = Math.max(1, Math.ceil(events.length / state.paging.lifeEvents.pageSize));
+        }
         $("life-event-note").value = "";
-        renderLifeEvents();
+        await renderLifeEvents();
         if (state.current) state.current.lifeEvents = events;
     }
 
@@ -880,6 +1076,7 @@
         const monthSelection = getMonthSelection(config);
         return {
             profileName: $(config.name).value.trim() || (config === PROFILE_CONFIGS.primary ? "未命名档案" : "合盘对象"),
+            profileGroup: config === PROFILE_CONFIGS.primary ? $("profile-group").value.trim() : "",
             calendarType: $(config.calendarType).value,
             year: Number($(config.year).value),
             month: monthSelection.month,
@@ -1036,10 +1233,22 @@
         const compatInput = getProfileInput(PROFILE_CONFIGS.compat);
         if (compatInput) {
             const compatChart = BaziCore.computeBaZi(compatInput);
+            const compatDayun = DayunEngine.buildDaYun(compatChart, primaryInput.targetYear);
+            const compatAllYearEvaluations = buildAllYearEvaluations(compatChart, compatDayun);
+            const primaryYears = new Map(allYearEvaluations.map((item) => [item.year, item.evaluation.scores.overall]));
+            const pairedTrend = compatAllYearEvaluations
+                .filter((item) => primaryYears.has(item.year))
+                .slice(0, 40)
+                .map((item) => ({
+                    year: item.year,
+                    primary: primaryYears.get(item.year),
+                    compat: item.evaluation.scores.overall
+                }));
             compatibility = {
                 input: compatInput,
                 chart: compatChart,
-                result: CompatibilityEngine.buildCompatibility(chart, compatChart)
+                result: CompatibilityEngine.buildCompatibility(chart, compatChart),
+                pairedTrend
             };
         }
         const modern = BaziAnalysis.buildModernLifeAdvice(chart, compatibility?.result || null, primaryInput.targetYear);
@@ -1075,7 +1284,6 @@
             report,
             lucky
         };
-        renderAll();
         showSection("bazi");
     }
 
@@ -1343,14 +1551,49 @@
         { label: "亥时", hour: 21, range: "21:00-22:59" }
     ];
 
+    const HOUR_RELATION_SCORE = {
+        六合: 6,
+        同支: 3,
+        相冲: -10,
+        相穿: -11,
+        相刑: -9,
+        自刑: -9,
+        相破: -8,
+        相害: -7
+    };
+
+    function clampScore(score, min = 20, max = 98) {
+        return Math.max(min, Math.min(max, Math.round(score)));
+    }
+
+    function buildHourRelationSignal(baseBranch, hourBranch, sourceLabel) {
+        if (!baseBranch || !hourBranch || !BaziCore?.getBranchRelation) return null;
+        const relation = BaziCore.getBranchRelation(baseBranch, hourBranch);
+        if (!relation) return null;
+        const delta = HOUR_RELATION_SCORE[relation.type] || 0;
+        if (!delta) return null;
+        return {
+            delta,
+            relationType: relation.type,
+            text: `${sourceLabel}${baseBranch}与${hourBranch}${relation.type}`
+        };
+    }
+
     function buildHourlyWindowGuide(dateText) {
         if (!state.current) return [];
         const [year, month, day] = String(dateText || "").split("-").map(Number);
         if (!year || !month || !day) return [];
+        const dayPillar = Solar.fromYmdHms(year, month, day, 12, 0, 0).getLunar().getDayInGanZhiExact();
+        const dayBranch = dayPillar?.[1];
+        const natalDayBranch = state.current.chart?.pillars?.[2]?.branch;
+        const usefulElements = [state.current.chart?.structure?.usefulElement, state.current.chart?.structure?.supportiveElement].filter(Boolean);
+        const avoidElements = state.current.chart?.structure?.yongshen?.avoid || [];
         return HOUR_WINDOWS.map((windowItem) => {
             const solar = Solar.fromYmdHms(year, month, day, windowItem.hour, 0, 0);
             const lunar = solar.getLunar();
             const pillar = lunar.getTimeInGanZhi();
+            const hourStem = pillar?.[0];
+            const hourBranch = pillar?.[1];
             const evaluation = BaziAnalysis.evaluateCycle(
                 state.current.chart,
                 pillar,
@@ -1363,22 +1606,88 @@
                     currentDayunLabel: state.current.dayun.current.label
                 }
             );
+            const hourStemElement = BaziCore.STEM_WUXING[BaziCore.STEMS.indexOf(hourStem)];
+            const hourBranchElement = BaziCore.BRANCH_WUXING[BaziCore.BRANCHES.indexOf(hourBranch)];
+            let dynamicDelta = 0;
+            const dynamicNotes = [];
+
+            const daySignal = buildHourRelationSignal(dayBranch, hourBranch, "当日");
+            if (daySignal) {
+                dynamicDelta += daySignal.delta;
+                dynamicNotes.push(daySignal.text);
+            }
+            const natalSignal = buildHourRelationSignal(natalDayBranch, hourBranch, "命盘");
+            if (natalSignal) {
+                dynamicDelta += natalSignal.delta;
+                dynamicNotes.push(natalSignal.text);
+            }
+
+            if ([hourStemElement, hourBranchElement].some((element) => usefulElements.includes(element))) {
+                dynamicDelta += 4;
+                dynamicNotes.push(`时段五行命中用神（${usefulElements.join(" / ")}）`);
+            }
+            if ([hourStemElement, hourBranchElement].some((element) => avoidElements.includes(element))) {
+                dynamicDelta -= 4;
+                dynamicNotes.push(`时段五行触发忌神（${avoidElements.join(" / ")}）`);
+            }
+
+            const score = clampScore(evaluation.scores.overall + dynamicDelta);
             const alerts = evaluation.specialAlerts || [];
             const attack = alerts.find((entry) => entry.type === "伤官见官");
+            const directRisk = alerts.find((entry) => entry.level !== "chance")?.text
+                || evaluation.palaceTriggers?.find((entry) => entry.relationType !== "六合")?.note
+                || evaluation.risks?.[0];
+            const directChance = alerts.find((entry) => entry.level === "chance")?.text
+                || evaluation.opportunities?.[0];
+            const dynamicSignal = dynamicNotes.filter(Boolean).slice(0, 2).join("；");
             const note = attack
                 ? `${windowItem.range} 容易出现“伤官见官”型冲突，和上级沟通要先讲事实再讲立场。`
-                : evaluation.scores.relation <= 58
-                    ? `${windowItem.range} 人际摩擦偏高，重要沟通建议先发书面要点。`
-                    : evaluation.scores.career >= 74
-                        ? `${windowItem.range} 执行力较强，适合推进谈判、汇报、签署。`
-                        : `${windowItem.range} 以稳为主，适合整理与复盘。`;
+                : score <= 56 || evaluation.scores.relation <= 58
+                    ? `${windowItem.range} 人际摩擦偏高：${directRisk || "先降火再沟通，避免硬碰硬。"}${dynamicSignal ? `（${dynamicSignal}）` : ""}`
+                    : score >= 74 || evaluation.scores.career >= 74
+                        ? `${windowItem.range} 推进窗口：${directChance || "适合谈判、汇报、签署和对外推进。"}${dynamicSignal ? `（${dynamicSignal}）` : ""}`
+                        : `${windowItem.range} 中性时段：${dynamicSignal || [evaluation.opportunities?.[0], evaluation.risks?.[0]].filter(Boolean).join("；") || "适合整理、复盘和补齐细节。"}。`;
             return {
                 ...windowItem,
-                score: evaluation.scores.overall,
+                score,
+                rawScore: evaluation.scores.overall,
+                delta: dynamicDelta,
                 note,
-                alerts
+                alerts,
+                riskHint: directRisk || evaluation.risks?.[0] || "",
+                chanceHint: directChance || evaluation.opportunities?.[0] || "",
+                focusTag: attack ? "伤官见官" : alerts[0]?.type || dynamicNotes[0] || "",
+                hourIndex: HOUR_WINDOWS.indexOf(windowItem)
             };
         });
+    }
+
+    function trimText(text, maxLen = 34) {
+        const raw = String(text || "").replace(/\s+/g, " ").trim();
+        if (raw.length <= maxLen) return raw;
+        return `${raw.slice(0, maxLen - 1)}…`;
+    }
+
+    function rankHourlyGuide(hourlyGuide) {
+        return (hourlyGuide || []).map((item) => {
+            const chanceAlerts = (item.alerts || []).filter((entry) => entry.level === "chance").length;
+            const riskAlerts = (item.alerts || []).filter((entry) => entry.level !== "chance").length;
+            const chanceWeight = item.score * 1.2 + Math.max(0, item.delta) * 3 + chanceAlerts * 9;
+            const riskWeight = (100 - item.score) * 1.15 + Math.max(0, -item.delta) * 3 + riskAlerts * 9;
+            return { ...item, chanceWeight, riskWeight };
+        });
+    }
+
+    function pickDistinctSlots(sortedRows, limit = 2, blockedLabels = new Set()) {
+        const used = new Set(blockedLabels || []);
+        const rows = [];
+        for (const item of sortedRows || []) {
+            if (used.has(item.label)) continue;
+            rows.push(item);
+            used.add(item.label);
+            if (rows.length >= limit) break;
+        }
+        return rows;
     }
 
     function renderDailyCalendar() {
@@ -1405,14 +1714,25 @@
             </button>
         `).join("");
         const selected = rows.find((item) => item.date === selectedDate) || rows[0];
-        const hourlyGuide = buildHourlyWindowGuide(selected.date);
-        const best = [...hourlyGuide].sort((a, b) => b.score - a.score).slice(0, 2);
-        const risky = [...hourlyGuide].sort((a, b) => a.score - b.score).slice(0, 2);
+        const hourlyGuide = rankHourlyGuide(buildHourlyWindowGuide(selected.date));
+        const bestCandidates = [...hourlyGuide]
+            .sort((a, b) => b.chanceWeight - a.chanceWeight || b.score - a.score || b.delta - a.delta || a.hourIndex - b.hourIndex);
+        const riskCandidates = [...hourlyGuide]
+            .sort((a, b) => b.riskWeight - a.riskWeight || a.score - b.score || a.delta - b.delta || a.hourIndex - b.hourIndex);
+        const best = pickDistinctSlots(bestCandidates, 2);
+        const risky = pickDistinctSlots(riskCandidates, 2, new Set(best.map((item) => item.label)));
+        const topRisk = risky[0] || null;
+        const topChance = best[0] || null;
+        const daySignal = [
+            topRisk ? `高风险窗口：${topRisk.label}（${trimText(topRisk.riskHint || topRisk.note, 28)}）` : "",
+            topChance ? `推进窗口：${topChance.label}（${trimText(topChance.chanceHint || topChance.note, 28)}）` : "",
+            selected.note ? `流日提示：${trimText(selected.note, 36)}` : ""
+        ].filter(Boolean).join("；");
         detail.innerHTML = [
             `<p><strong>${selected.date}</strong>（${selected.pillar}） · ${selected.level} · 评分 ${selected.score}</p>`,
-            `<p class="good-text">日内顺时段：${best.map((item) => `${item.label}(${item.range})`).join("、")}</p>`,
-            `<p class="bad-text">日内谨慎时段：${risky.map((item) => `${item.label}(${item.range})`).join("、")}</p>`,
-            `<p>重点提醒：${risky[0]?.note || selected.note}</p>`
+            `<p class="good-text">日内顺时段：${best.map((item) => `${item.label}(${item.range}) · ${trimText(item.chanceHint || item.focusTag || item.note, 22)}`).join("；") || "暂无明显顺时段"}</p>`,
+            `<p class="bad-text">日内谨慎时段：${risky.map((item) => `${item.label}(${item.range}) · ${trimText(item.riskHint || item.focusTag || item.note, 22)}`).join("；") || "暂无明显谨慎时段"}</p>`,
+            `<p>重点提醒：${daySignal || "今日整体中性，按计划推进，避免临时起意。"}。</p>`
         ].join("");
         grid.querySelectorAll("[data-calendar-date]").forEach((button) => {
             button.addEventListener("click", () => {
@@ -1425,6 +1745,7 @@
     function renderLifeRoadmap(allYearEvaluations, criticalYears) {
         const canvas = $("life-roadmap-chart");
         const summary = $("life-roadmap-summary");
+        const overlay = $("life-roadmap-overlay");
         if (!canvas || !summary) return;
         const birthYear = state.current.chart.source.standardSolar.getYear();
         const byYear = new Map((allYearEvaluations || []).map((item) => [item.year, item]));
@@ -1438,39 +1759,175 @@
                 value: evalItem ? evalItem.evaluation.scores.overall : 60
             });
         }
-        const wealthTop = [...(allYearEvaluations || [])].sort((a, b) => b.evaluation.scores.wealth - a.evaluation.scores.wealth).slice(0, 3);
-        const relationTop = [...(allYearEvaluations || [])].sort((a, b) => b.evaluation.scores.relation - a.evaluation.scores.relation).slice(0, 3);
-        const healthRisk = [...(allYearEvaluations || [])].sort((a, b) => a.evaluation.scores.health - b.evaluation.scores.health).slice(0, 3);
+        const wealthTop = [...(allYearEvaluations || [])]
+            .sort((a, b) => b.evaluation.scores.wealth - a.evaluation.scores.wealth)
+            .slice(0, 3);
+        const relationTop = [...(allYearEvaluations || [])]
+            .sort((a, b) => b.evaluation.scores.relation - a.evaluation.scores.relation)
+            .slice(0, 3);
+        const healthRisk = [...(allYearEvaluations || [])]
+            .sort((a, b) => a.evaluation.scores.health - b.evaluation.scores.health)
+            .slice(0, 3);
         const warningTop = [...(allYearEvaluations || [])]
             .filter((item) => (item.evaluation.specialAlerts || []).some((entry) => entry.level !== "chance"))
             .sort((a, b) => (b.evaluation.specialAlerts || []).length - (a.evaluation.specialAlerts || []).length)
             .slice(0, 5);
-        const markers = [
-            ...wealthTop.map((item) => ({ index: item.year - birthYear, type: "wealth", symbol: "财" })),
-            ...relationTop.map((item) => ({ index: item.year - birthYear, type: "relation", symbol: "缘" })),
-            ...healthRisk.map((item) => ({ index: item.year - birthYear, type: "health", symbol: "警" })),
-            ...warningTop.map((item) => ({ index: item.year - birthYear, type: "warning", symbol: "危" }))
+        const markerCandidates = [
+            ...wealthTop.map((item) => ({
+                year: item.year,
+                pillar: item.pillar,
+                index: item.year - birthYear,
+                type: "wealth",
+                symbol: "财",
+                kind: "财富高点",
+                bad: false,
+                reason: `财运分 ${item.evaluation.scores.wealth}，${item.evaluation.opportunities?.[0] || item.evaluation.blunt}`
+            })),
+            ...relationTop.map((item) => ({
+                year: item.year,
+                pillar: item.pillar,
+                index: item.year - birthYear,
+                type: "relation",
+                symbol: "缘",
+                kind: "关系节点",
+                bad: false,
+                reason: `关系分 ${item.evaluation.scores.relation}，${item.evaluation.opportunities?.[0] || item.evaluation.blunt}`
+            })),
+            ...healthRisk.map((item) => ({
+                year: item.year,
+                pillar: item.pillar,
+                index: item.year - birthYear,
+                type: "health",
+                symbol: "警",
+                kind: "健康预警",
+                bad: true,
+                reason: `健康分 ${item.evaluation.scores.health}，${item.evaluation.risks?.[0] || item.evaluation.blunt}`
+            })),
+            ...warningTop.map((item) => ({
+                year: item.year,
+                pillar: item.pillar,
+                index: item.year - birthYear,
+                type: "warning",
+                symbol: "危",
+                kind: "雷达预警",
+                bad: true,
+                reason: `${(item.evaluation.specialAlerts || []).map((entry) => entry.type).join("、") || "重点预警"}：${item.evaluation.risks?.[0] || item.evaluation.blunt}`
+            }))
         ];
-        ChartRenderer.drawRoadmapChart(canvas, points, markers);
+        const markerBuckets = new Map();
+        const markers = markerCandidates.map((marker) => {
+            const key = String(marker.index);
+            const rank = markerBuckets.get(key) || 0;
+            markerBuckets.set(key, rank + 1);
+            const angle = (Math.PI / 3) * (rank % 6);
+            const radius = rank === 0 ? 0 : 9 + Math.floor((rank - 1) / 6) * 4;
+            return {
+                ...marker,
+                offsetX: Math.cos(angle) * radius,
+                offsetY: Math.sin(angle) * radius
+            };
+        });
+        const chartLayout = ChartRenderer.drawRoadmapChart(canvas, points, markers);
+        if (overlay && chartLayout?.markerPositions) {
+            overlay.style.width = `${chartLayout.width}px`;
+            overlay.style.height = `${chartLayout.height}px`;
+            overlay.innerHTML = chartLayout.markerPositions.map((marker) => `
+                <div
+                    class="roadmap-marker roadmap-marker-${marker.type}"
+                    role="button"
+                    tabindex="0"
+                    data-roadmap-year="${marker.year}"
+                    style="left:${(marker.x / chartLayout.width) * 100}%; top:${(marker.y / chartLayout.height) * 100}%"
+                    title="${marker.year}年 · ${marker.symbol} · 分数${marker.score} · 点击跳转卡片">
+                    ${marker.symbol}
+                </div>
+            `).join("");
+        }
+        const lifeStage = (age) => {
+            if (age <= 24) return "少年期";
+            if (age <= 35) return "青年期";
+            if (age <= 50) return "中年前段";
+            if (age <= 65) return "中年后段";
+            return "成熟期";
+        };
+        const grouped = {};
+        const mergedCardsByYear = new Map();
+        const mergeRoadmapCard = (item) => {
+            if (!item || !Number.isFinite(item.year)) return;
+            const existing = mergedCardsByYear.get(item.year) || {
+                year: item.year,
+                pillar: item.pillar || "",
+                kinds: new Set(),
+                reasons: [],
+                bad: false
+            };
+            if (item.pillar && !existing.pillar) existing.pillar = item.pillar;
+            if (item.kind) existing.kinds.add(item.kind);
+            if (item.reason && !existing.reasons.includes(item.reason)) existing.reasons.push(item.reason);
+            existing.bad = existing.bad || !!item.bad;
+            mergedCardsByYear.set(item.year, existing);
+        };
+        (criticalYears?.favorable || []).forEach((item) => mergeRoadmapCard({ ...item, kind: "顺势窗口", bad: false }));
+        (criticalYears?.risky || []).forEach((item) => mergeRoadmapCard({ ...item, kind: "预警窗口", bad: true }));
+        markerCandidates.forEach((item) => mergeRoadmapCard(item));
+        const allCards = Array.from(mergedCardsByYear.values())
+            .sort((a, b) => a.year - b.year)
+            .map((item) => ({
+                year: item.year,
+                pillar: item.pillar || byYear.get(item.year)?.pillar || "-",
+                kind: Array.from(item.kinds).join(" / ") || "关键节点",
+                bad: item.bad,
+                reason: item.reasons.slice(0, 2).join("；") || "该年结构有明显引动，建议切换到该年查看详细推演。"
+            }));
+        allCards.forEach((item) => {
+            const stage = lifeStage(item.year - birthYear);
+            if (!grouped[stage]) grouped[stage] = [];
+            grouped[stage].push(item);
+        });
         const cards = [
-            ...(criticalYears?.favorable || []).slice(0, 4).map((item) => `
+            ...Object.entries(grouped).map(([stage, rows]) => `
                 <div class="mini-card">
-                    <p class="section-kicker">顺势窗口</p>
-                    <h3>${item.year}年 · ${item.pillar}</h3>
-                    <p>${item.reason}</p>
-                    <button type="button" class="btn-link" data-target-year="${item.year}">切换分析年</button>
+                    <h3>${stage}</h3>
+                    <p class="muted">${rows.map((item) => `${item.year}年`).join("、")}</p>
                 </div>
-            `),
-            ...(criticalYears?.risky || []).slice(0, 4).map((item) => `
-                <div class="mini-card">
-                    <p class="section-kicker">预警窗口</p>
-                    <h3>${item.year}年 · ${item.pillar}</h3>
-                    <p class="bad-text">${item.reason}</p>
-                    <button type="button" class="btn-link" data-target-year="${item.year}">切换分析年</button>
-                </div>
+                ${rows.map((item) => `
+                    <div class="mini-card ${item.bad ? "warning-card" : ""}" data-roadmap-card-year="${item.year}">
+                        <p class="section-kicker">${item.kind}</p>
+                        <h3>${item.year}年 · ${item.pillar}</h3>
+                        <p class="${item.bad ? "bad-text" : ""}">${item.reason}</p>
+                        <button type="button" class="btn-link" data-target-year="${item.year}">切换分析年</button>
+                    </div>
+                `).join("")}
             `)
         ];
         summary.innerHTML = cards.join("") || `<div class="mini-card"><p>当前没有可展示的全生命周期数据。</p></div>`;
+        const focusRoadmapCard = (year) => {
+            const card = summary.querySelector(`[data-roadmap-card-year="${year}"]`);
+            if (!card) {
+                if (Number.isFinite(year)) setTargetYearFromSummary(year);
+                return;
+            }
+            summary.querySelectorAll(".mini-card.is-focused").forEach((node) => node.classList.remove("is-focused"));
+            card.classList.add("is-focused");
+            card.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+            window.setTimeout(() => card.classList.remove("is-focused"), 1800);
+        };
+        if (overlay) {
+            overlay.querySelectorAll("[data-roadmap-year]").forEach((marker) => {
+                const triggerFocus = () => {
+                    const year = Number(marker.dataset.roadmapYear);
+                    if (!Number.isFinite(year)) return;
+                    focusRoadmapCard(year);
+                };
+                marker.addEventListener("click", triggerFocus);
+                marker.addEventListener("keydown", (event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        triggerFocus();
+                    }
+                });
+            });
+        }
         summary.querySelectorAll("[data-target-year]").forEach((button) => {
             button.addEventListener("click", () => setTargetYearFromSummary(Number(button.dataset.targetYear)));
         });
@@ -1788,16 +2245,29 @@
 
     async function rebuildKnowledgeVectors() {
         const config = saveAiConfig(getAiConfigFromForm());
+        const progressWrap = $("kb-reindex-progress");
+        const progressBar = $("kb-reindex-progress-bar");
+        const progressText = $("kb-reindex-progress-text");
+        const updateProgress = (done, total) => {
+            if (!progressWrap || !progressBar || !progressText) return;
+            const percent = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+            progressWrap.classList.remove("hidden");
+            progressBar.style.width = `${percent}%`;
+            progressText.textContent = `${percent}% (${done}/${total})`;
+        };
         if (config.provider === "none") {
             renderLlmStatus("未启用远端模型接口，无法重建向量索引。");
+            if (progressWrap) progressWrap.classList.add("hidden");
             return;
         }
         if (!config.embeddingModel) {
             renderLlmStatus("请先填写向量模型，再重建知识库向量索引。");
+            if (progressWrap) progressWrap.classList.add("hidden");
             return;
         }
         const entries = KnowledgeBaseEngine.loadEntries();
         renderLlmStatus(`开始重建向量索引，共 ${entries.length} 条。`);
+        updateProgress(0, entries.length);
         try {
             for (let index = 0; index < entries.length; index++) {
                 const entry = entries[index];
@@ -1805,11 +2275,18 @@
                 const embedding = await LLMClient.embed(config, config.embeddingModel, text);
                 KnowledgeBaseEngine.setEntryEmbedding(entry.id, embedding, config.embeddingModel);
                 renderLlmStatus(`正在重建向量索引：${index + 1}/${entries.length} · ${entry.title}`);
+                updateProgress(index + 1, entries.length);
+                await new Promise((resolve) => setTimeout(resolve, 0));
             }
             renderLlmStatus(`向量索引重建完成，共 ${entries.length} 条，使用模型 ${config.embeddingModel}。`);
+            updateProgress(entries.length, entries.length);
             refreshKnowledgeBaseMatches();
         } catch (error) {
             renderLlmStatus(`向量索引重建失败：${error.message}`);
+        } finally {
+            if (progressWrap) {
+                setTimeout(() => progressWrap.classList.add("hidden"), 1400);
+            }
         }
     }
 
@@ -1933,6 +2410,7 @@
     }
 
     function renderCompatibility(compatibility) {
+        const trendCanvas = $("compatibility-trend-chart");
         if (!compatibility) {
             $("compatibility-analysis").innerHTML = `<div class="mini-card"><h3>未启用合盘</h3><p>打开“启用合盘 / 合婚分析”后，录入第二个人的出生信息，这里会显示合盘、合婚、家庭协同和子嗣协同结果。</p></div>`;
             ChartRenderer.drawBarChart($("compatibility-chart"), [
@@ -1943,6 +2421,16 @@
                 { element: "财务", score: 0 },
                 { element: "子嗣", score: 0 }
             ]);
+            if (trendCanvas) {
+                ChartRenderer.drawMultiLineChart(
+                    trendCanvas,
+                    [
+                        { name: "主盘", color: "#9a3412", values: [0] },
+                        { name: "客盘", color: "#0f766e", values: [0] }
+                    ],
+                    ["-"]
+                );
+            }
             return;
         }
         const scores = compatibility.result.scores;
@@ -1954,6 +2442,17 @@
             { element: "财务", score: scores.finance },
             { element: "子嗣", score: scores.child }
         ]);
+        if (trendCanvas) {
+            const trend = compatibility.pairedTrend || [];
+            ChartRenderer.drawMultiLineChart(
+                trendCanvas,
+                [
+                    { name: "主盘", color: "#9a3412", values: trend.map((item) => item.primary) },
+                    { name: "客盘", color: "#0f766e", values: trend.map((item) => item.compat) }
+                ],
+                trend.map((item) => String(item.year).slice(2))
+            );
+        }
         $("compatibility-analysis").innerHTML = compatibility.result.sections.map(renderSectionCard).join("");
     }
 
@@ -1970,7 +2469,7 @@
                 $("lucky-suggestions").innerHTML += modern.map(renderSectionCard).join("");
             }
             if ((state.current.lifeEvents || []).length) {
-                $("lucky-suggestions").innerHTML += `<div class="report-block"><h3>事件校准上下文</h3><p>已加载 ${(state.current.lifeEvents || []).length} 条历史事件作为推演校准：${state.current.lifeEvents.slice(0, 4).map((item) => `${item.year}年${lifeEventTypeLabel(item.type)}（${escapeHtml(item.note)}）`).join("；")}。</p></div>`;
+                $("lucky-suggestions").innerHTML += `<div class="report-block"><h3>事件校准上下文</h3><p>已加载 ${(state.current.lifeEvents || []).length} 条历史事件作为推演校准：${state.current.lifeEvents.map((item) => `${item.year}年${lifeEventTypeLabel(item.type)}（${escapeHtml(item.note)}）`).join("；")}。</p></div>`;
             }
             if (kbMatches?.length) {
                 const citations = KnowledgeBaseEngine.buildCitedReferences(mergeKnowledgeMatches(kbMatches, state.current.ragMatches || []), 3);
@@ -2357,6 +2856,7 @@
     function loadCompatibilityExample() {
         setCompatibilityEnabled(true);
         const config = PROFILE_CONFIGS.compat;
+        $("compat-mode").value = "couple";
         $(config.name).value = "合盘对象示例";
         $(config.calendarType).value = "solar";
         $(config.calendarType).dataset.prevType = "solar";
@@ -2378,6 +2878,7 @@
     function loadExample() {
         const config = PROFILE_CONFIGS.primary;
         $(config.name).value = "示例命盘";
+        $("profile-group").value = "示例";
         $(config.calendarType).value = "solar";
         $(config.calendarType).dataset.prevType = "solar";
         $(config.year).value = "1992";
@@ -2399,36 +2900,83 @@
         runAnalysis(getProfileInput(config));
     }
 
-    function saveCurrentProfile() {
+    async function saveCurrentProfile() {
         if (!state.current) {
             alert("请先完成一次测算。");
             return;
         }
-        const profiles = loadProfiles();
-        profiles.unshift({
-            id: Date.now(),
+        const row = {
+            id: `profile-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
             name: state.current.input.profileName,
+            group: state.current.input.profileGroup || "",
+            savedAt: Date.now(),
             input: state.current.input
-        });
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles.slice(0, 16)));
-        renderSavedProfiles();
-    }
-
-    function loadProfiles() {
-        try {
-            return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-        } catch {
-            return [];
-        }
-    }
-
-    function renderSavedProfiles() {
+        };
         const profiles = loadProfiles();
-        $("saved-profiles").innerHTML = profiles.length
-            ? profiles.map((item) => `
+        profiles.unshift(row);
+        saveProfiles(profiles);
+        if (window.LocalDB?.available) {
+            await window.LocalDB.upsertProfile(row);
+            state.paging.profiles.total = await window.LocalDB.countProfiles();
+        } else {
+            state.paging.profiles.total = profiles.length;
+        }
+        state.paging.profiles.page = 1;
+        await renderSavedProfiles();
+    }
+
+    async function renderProfileGroupFilter() {
+        const filter = $("profile-group-filter");
+        if (!filter) return;
+        const groups = window.LocalDB?.available
+            ? await window.LocalDB.listProfileGroups()
+            : Array.from(new Set(loadProfiles().map((item) => item.group || item.input?.profileGroup || "未分组"))).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+        const current = filter.value || "all";
+        filter.innerHTML = [
+            `<option value="all">全部分组</option>`,
+            ...groups.map((group) => `<option value="${escapeHtml(group)}">${escapeHtml(group)}</option>`)
+        ].join("");
+        filter.value = groups.includes(current) ? current : "all";
+    }
+
+    async function queryProfilesPage() {
+        const filter = $("profile-group-filter")?.value || "all";
+        const pager = state.paging.profiles;
+        const offset = (pager.page - 1) * pager.pageSize;
+        if (window.LocalDB?.available) {
+            const pageResult = await window.LocalDB.listProfilesPage({
+                offset,
+                limit: pager.pageSize,
+                group: filter === "all" ? "" : filter
+            });
+            pager.total = pageResult.total || 0;
+            if (!pageResult.rows?.length && pager.total > 0 && pager.page > 1) {
+                pager.page = Math.max(1, Math.ceil(pager.total / pager.pageSize));
+                return queryProfilesPage();
+            }
+            return pageResult.rows || [];
+        }
+        const localRows = loadProfiles()
+            .slice()
+            .sort((a, b) => Number(b.savedAt || b.id || 0) - Number(a.savedAt || a.id || 0))
+            .filter((item) => {
+                const group = item.group || item.input?.profileGroup || "未分组";
+                return filter === "all" || group === filter;
+            });
+        const pageResult = getLocalPagedRows(localRows, pager.page, pager.pageSize);
+        pager.total = pageResult.total;
+        pager.page = pageResult.page;
+        return pageResult.rows;
+    }
+
+    async function renderSavedProfiles() {
+        await renderProfileGroupFilter();
+        const rows = await queryProfilesPage();
+        $("saved-profiles").innerHTML = rows.length
+            ? rows.map((item) => `
                 <div class="saved-item">
                     <div>
-                        <strong>${item.name}</strong>
+                        <strong>${item.name} · ${escapeHtml(item.group || item.input?.profileGroup || "未分组")}</strong>
                         <p class="muted">${item.input.calendarType === "solar" ? "公历" : "农历"} · ${item.input.year}-${pad(Math.abs(item.input.month))}-${pad(item.input.day)} ${pad(item.input.hour)}:${pad(item.input.minute)} · ${item.input.regionName}</p>
                     </div>
                     <button class="btn-link" data-load-id="${item.id}">载入</button>
@@ -2437,17 +2985,21 @@
             : `<p class="muted">还没有本地档案。</p>`;
         $("saved-profiles").querySelectorAll("[data-load-id]").forEach((button) => {
             button.addEventListener("click", () => {
-                const profile = profiles.find((item) => String(item.id) === button.dataset.loadId);
+                const profile = rows.find((item) => String(item.id) === button.dataset.loadId);
                 if (!profile) return;
                 applyInput(PROFILE_CONFIGS.primary, profile.input, profile.name);
                 updatePreview(PROFILE_CONFIGS.primary);
                 runAnalysis(getProfileInput(PROFILE_CONFIGS.primary));
             });
         });
+        updatePager("profiles", "profiles-page-info", "btn-profiles-prev", "btn-profiles-next");
     }
 
     function applyInput(config, input, name) {
         $(config.name).value = name || input.profileName || "";
+        if (config === PROFILE_CONFIGS.primary) {
+            $("profile-group").value = input.profileGroup || "";
+        }
         $(config.calendarType).value = input.calendarType || "solar";
         $(config.calendarType).dataset.prevType = $(config.calendarType).value;
         $(config.year).value = String(input.year);
@@ -2468,18 +3020,284 @@
         $(config.region).value = String(regionIndex);
     }
 
-    function clearProfiles() {
-        localStorage.removeItem(STORAGE_KEY);
-        renderSavedProfiles();
+    async function clearProfiles() {
+        saveProfiles([]);
+        if (window.LocalDB?.available) {
+            await window.LocalDB.clearProfiles();
+        }
+        state.paging.profiles.total = 0;
+        state.paging.profiles.page = 1;
+        await renderSavedProfiles();
     }
 
-    initSelects();
-    bindEvents();
-    setInputStep(1);
-    renderSavedProfiles();
-    renderLifeEvents();
-    renderKnowledgeBase([]);
-    renderCaseSimilarity([]);
-    updatePreview(PROFILE_CONFIGS.primary);
-    updatePreview(PROFILE_CONFIGS.compat);
+    async function saveCurrentCompatibilityProfile() {
+        if (!$(PROFILE_CONFIGS.compat.enabled).checked) {
+            alert("请先启用合盘并录入对象信息。");
+            return;
+        }
+        const primaryInput = getProfileInput(PROFILE_CONFIGS.primary);
+        const compatInput = getProfileInput(PROFILE_CONFIGS.compat);
+        if (!primaryInput || !compatInput) {
+            alert("请先完成主盘与客盘录入。");
+            return;
+        }
+        const row = {
+            id: `compat-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+            name: `${primaryInput.profileName} + ${compatInput.profileName}`,
+            mode: $("compat-mode").value || "couple",
+            createdAt: Date.now(),
+            primaryInput,
+            compatInput
+        };
+        const profiles = loadCompatProfiles();
+        profiles.unshift(row);
+        saveCompatProfiles(profiles);
+        if (window.LocalDB?.available) {
+            await window.LocalDB.upsertCompatProfile(row);
+            state.paging.compatProfiles.total = await window.LocalDB.countCompatProfiles();
+        } else {
+            state.paging.compatProfiles.total = profiles.length;
+        }
+        state.paging.compatProfiles.page = 1;
+        await renderCompatibilityProfiles();
+    }
+
+    async function queryCompatProfilesPage() {
+        const pager = state.paging.compatProfiles;
+        const offset = (pager.page - 1) * pager.pageSize;
+        if (window.LocalDB?.available) {
+            const pageResult = await window.LocalDB.listCompatProfilesPage({ offset, limit: pager.pageSize });
+            pager.total = pageResult.total || 0;
+            if (!pageResult.rows?.length && pager.total > 0 && pager.page > 1) {
+                pager.page = Math.max(1, Math.ceil(pager.total / pager.pageSize));
+                return queryCompatProfilesPage();
+            }
+            return pageResult.rows || [];
+        }
+        const localRows = loadCompatProfiles()
+            .slice()
+            .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+        const pageResult = getLocalPagedRows(localRows, pager.page, pager.pageSize);
+        pager.total = pageResult.total;
+        pager.page = pageResult.page;
+        return pageResult.rows;
+    }
+
+    async function renderCompatibilityProfiles() {
+        const container = $("compat-profiles-list");
+        if (!container) return;
+        const rows = await queryCompatProfilesPage();
+        container.innerHTML = rows.length
+            ? rows.map((item) => `
+                <div class="saved-item">
+                    <div>
+                        <strong>${escapeHtml(item.name)}</strong>
+                        <p class="muted">${escapeHtml(item.mode || "couple")} · ${item.primaryInput?.year || "-"} / ${item.compatInput?.year || "-"}</p>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn-link" data-compat-load="${escapeHtml(item.id)}">调入</button>
+                        <button type="button" class="btn-link" data-compat-remove="${escapeHtml(item.id)}">删除</button>
+                    </div>
+                </div>
+            `).join("")
+            : `<p class="muted">暂无双人组合模板。可在录入后点击“保存组合模板”。</p>`;
+        container.querySelectorAll("[data-compat-load]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const row = rows.find((item) => String(item.id) === button.dataset.compatLoad);
+                if (!row) return;
+                applyInput(PROFILE_CONFIGS.primary, row.primaryInput, row.primaryInput.profileName);
+                setCompatibilityEnabled(true);
+                applyInput(PROFILE_CONFIGS.compat, row.compatInput, row.compatInput.profileName);
+                $("compat-mode").value = row.mode || "couple";
+                updatePreview(PROFILE_CONFIGS.primary);
+                updatePreview(PROFILE_CONFIGS.compat);
+                runAnalysis(getProfileInput(PROFILE_CONFIGS.primary));
+                showSection("compat");
+            });
+        });
+        container.querySelectorAll("[data-compat-remove]").forEach((button) => {
+            button.addEventListener("click", async () => {
+                const next = loadCompatProfiles().filter((item) => String(item.id) !== String(button.dataset.compatRemove));
+                saveCompatProfiles(next);
+                if (window.LocalDB?.available) {
+                    await window.LocalDB.removeCompatProfile(button.dataset.compatRemove);
+                    state.paging.compatProfiles.total = await window.LocalDB.countCompatProfiles();
+                } else {
+                    state.paging.compatProfiles.total = Math.max(0, state.paging.compatProfiles.total - 1);
+                }
+                await renderCompatibilityProfiles();
+            });
+        });
+        updatePager("compatProfiles", "compat-profiles-page-info", "btn-compat-profiles-prev", "btn-compat-profiles-next");
+    }
+
+    function readTextFile(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ""));
+            reader.onerror = () => reject(new Error("文件读取失败"));
+            reader.readAsText(file);
+        });
+    }
+
+    async function exportAllData() {
+        const payload = {
+            version: 2,
+            exportedAt: new Date().toISOString(),
+            aiConfig: loadAiConfig(),
+            geoConfig: loadGeoConfig(),
+            profiles: loadProfiles(),
+            lifeEvents: loadLifeEvents(),
+            compatProfiles: loadCompatProfiles(),
+            knowledgeEntries: KnowledgeBaseEngine.loadEntries()
+        };
+        if (window.LocalDB?.available) {
+            try {
+                payload.indexedDb = await window.LocalDB.exportAll();
+            } catch {
+                payload.indexedDb = null;
+            }
+        }
+        downloadTextFile(`tming-backup-${Date.now()}.json`, JSON.stringify(payload, null, 2), "application/json;charset=utf-8");
+    }
+
+    async function importAllDataFile(event) {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        try {
+            const text = await readTextFile(file);
+            const parsed = JSON.parse(text);
+            const aiConfig = { ...defaultAiConfig(), ...(parsed.aiConfig || parsed.indexedDb?.kv?.[AI_CONFIG_KEY] || {}) };
+            const geoConfig = { ...defaultGeoConfig(), ...(parsed.geoConfig || parsed.indexedDb?.kv?.[GEO_CONFIG_KEY] || {}) };
+            const profiles = Array.isArray(parsed.profiles) ? parsed.profiles : (parsed.indexedDb?.profiles || []);
+            const lifeEvents = Array.isArray(parsed.lifeEvents) ? parsed.lifeEvents : (parsed.indexedDb?.lifeEvents || []);
+            const compatProfiles = Array.isArray(parsed.compatProfiles) ? parsed.compatProfiles : (parsed.indexedDb?.compatProfiles || []);
+            const knowledgeEntries = Array.isArray(parsed.knowledgeEntries) ? parsed.knowledgeEntries : (parsed.indexedDb?.knowledge || []);
+            saveAiConfig(aiConfig);
+            saveGeoConfig(geoConfig);
+            saveProfiles(profiles || []);
+            saveLifeEvents(lifeEvents || []);
+            saveCompatProfiles(compatProfiles || []);
+            if (window.LocalDB?.available && parsed.indexedDb) {
+                await window.LocalDB.importAll(parsed.indexedDb, true);
+            }
+            if (Array.isArray(knowledgeEntries)) {
+                KnowledgeBaseEngine.saveEntries(knowledgeEntries);
+            }
+            if (window.LocalDB?.available) {
+                const [profileCount, lifeEventCount, compatCount] = await Promise.all([
+                    window.LocalDB.countProfiles(),
+                    window.LocalDB.countLifeEvents(),
+                    window.LocalDB.countCompatProfiles()
+                ]);
+                state.paging.profiles.total = profileCount;
+                state.paging.lifeEvents.total = lifeEventCount;
+                state.paging.compatProfiles.total = compatCount;
+            } else {
+                state.paging.profiles.total = (profiles || []).length;
+                state.paging.lifeEvents.total = (lifeEvents || []).length;
+                state.paging.compatProfiles.total = (compatProfiles || []).length;
+            }
+            state.paging.profiles.page = 1;
+            state.paging.lifeEvents.page = 1;
+            state.paging.compatProfiles.page = 1;
+            renderAiConfig(loadAiConfig());
+            renderGeoConfig(loadGeoConfig());
+            await renderSavedProfiles();
+            await renderCompatibilityProfiles();
+            await renderLifeEvents();
+            refreshKnowledgeBaseMatches();
+            alert("数据恢复完成。");
+        } catch (error) {
+            alert(`导入失败：${error.message}`);
+        } finally {
+            event.target.value = "";
+        }
+    }
+
+    function normalizePillarText(value) {
+        const text = String(value || "").trim();
+        if (text.length < 2) return "";
+        return text.slice(0, 2);
+    }
+
+    async function runReverseLookup() {
+        const resultEl = $("reverse-lookup-result");
+        if (!resultEl) return;
+        const yearPillar = normalizePillarText($("reverse-year-pillar").value);
+        const monthPillar = normalizePillarText($("reverse-month-pillar").value);
+        const dayPillar = normalizePillarText($("reverse-day-pillar").value);
+        const timePillar = normalizePillarText($("reverse-time-pillar").value);
+        if (!yearPillar || !monthPillar || !dayPillar || !timePillar) {
+            resultEl.innerHTML = `<div class="mini-card warning-card"><p>请完整填写四柱（如：甲子、乙丑）。</p></div>`;
+            return;
+        }
+        const startYear = Math.max(1900, Math.min(2099, Number($("reverse-start-year").value || 1990)));
+        const endYear = Math.max(startYear, Math.min(2099, Number($("reverse-end-year").value || startYear + 10)));
+        resultEl.innerHTML = `<div class="mini-card"><p>正在反查 ${startYear}-${endYear}，请稍候...</p></div>`;
+        const hits = [];
+        const maxHits = 160;
+        let stop = false;
+        for (let year = startYear; year <= endYear && !stop; year++) {
+            for (let month = 1; month <= 12 && !stop; month++) {
+                const dayCount = new Date(year, month, 0).getDate();
+                for (let day = 1; day <= dayCount && !stop; day++) {
+                    for (let hour = 0; hour < 24; hour += 2) {
+                        const solar = Solar.fromYmdHms(year, month, day, hour, 0, 0);
+                        const lunar = solar.getLunar();
+                        const candidate = {
+                            year: lunar.getYearInGanZhiExact(),
+                            month: lunar.getMonthInGanZhiExact(),
+                            day: lunar.getDayInGanZhiExact(),
+                            time: lunar.getTimeInGanZhi()
+                        };
+                        if (
+                            candidate.year === yearPillar
+                            && candidate.month === monthPillar
+                            && candidate.day === dayPillar
+                            && candidate.time === timePillar
+                        ) {
+                            const shichen = BaziCore.getShichenInfo(hour, 0);
+                            hits.push({
+                                solar: solar.toYmdHms().slice(0, 16),
+                                lunar: lunar.toString(),
+                                shichen: shichen.label
+                            });
+                            if (hits.length >= maxHits) {
+                                stop = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                await new Promise((resolve) => setTimeout(resolve, 0));
+            }
+        }
+        resultEl.innerHTML = hits.length
+            ? hits.map((item, index) => `
+                <div class="mini-card">
+                    <h3>候选 ${index + 1}</h3>
+                    <p>公历：${item.solar}</p>
+                    <p>农历：${item.lunar}</p>
+                    <p>时辰：${item.shichen}</p>
+                </div>
+            `).join("")
+            : `<div class="mini-card"><p>指定区间内未找到匹配四柱，可扩大年份区间或检查四柱输入。</p></div>`;
+    }
+
+    async function startApp() {
+        await bootstrapStorage();
+        await (KnowledgeBaseEngine.ready || Promise.resolve());
+        initSelects();
+        bindEvents();
+        await renderSavedProfiles();
+        await renderCompatibilityProfiles();
+        await renderLifeEvents();
+        renderKnowledgeBase([]);
+        renderCaseSimilarity([]);
+        updatePreview(PROFILE_CONFIGS.primary);
+        updatePreview(PROFILE_CONFIGS.compat);
+    }
+
+    startApp();
 })();

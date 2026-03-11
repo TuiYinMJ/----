@@ -40,10 +40,45 @@
             source: "内置书目"
         }
     ];
+    let entryCache = null;
+    let entryReady = false;
 
     function cloneSeed() {
         return SEED_ENTRIES.map((item) => ({ ...item }));
     }
+
+    function readLocalEntries() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+            if (!Array.isArray(parsed) || !parsed.length) return cloneSeed();
+            return parsed.map(normalizeEntry);
+        } catch {
+            return cloneSeed();
+        }
+    }
+
+    async function hydrateFromIndexedDb() {
+        entryCache = readLocalEntries();
+        if (!window.LocalDB?.available) {
+            entryReady = true;
+            return entryCache;
+        }
+        await window.LocalDB.ready;
+        const dbRows = await window.LocalDB.listKnowledgeEntries();
+        if (Array.isArray(dbRows) && dbRows.length) {
+            entryCache = dbRows.map(normalizeEntry);
+        } else {
+            await window.LocalDB.replaceKnowledgeEntries(entryCache);
+        }
+        entryReady = true;
+        return entryCache;
+    }
+
+    const ready = hydrateFromIndexedDb().catch(() => {
+        entryCache = readLocalEntries();
+        entryReady = true;
+        return entryCache;
+    });
 
     function normalizeEntry(entry) {
         return {
@@ -60,18 +95,20 @@
     }
 
     function loadEntries() {
-        try {
-            const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-            if (!Array.isArray(parsed) || !parsed.length) return cloneSeed();
-            return parsed.map(normalizeEntry);
-        } catch {
-            return cloneSeed();
+        if (entryCache && Array.isArray(entryCache)) {
+            return entryCache.map(normalizeEntry);
         }
+        entryCache = readLocalEntries();
+        return entryCache.map(normalizeEntry);
     }
 
     function saveEntries(entries) {
         const normalized = entries.map(normalizeEntry).slice(0, MAX_ENTRIES);
+        entryCache = normalized;
         localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+        if (window.LocalDB?.available) {
+            window.LocalDB.replaceKnowledgeEntries(normalized).catch(() => {});
+        }
         return normalized;
     }
 
@@ -459,6 +496,8 @@
     }
 
     window.KnowledgeBaseEngine = {
+        ready,
+        isReady: () => entryReady,
         STORAGE_KEY,
         loadEntries,
         saveEntries,

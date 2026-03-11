@@ -21,6 +21,7 @@
                 <a href="#" class="active" data-section="input">排盘输入</a>
                 <a href="#" data-section="bazi">八字排盘</a>
                 <a href="#" data-section="dayun">大运流年</a>
+                <a href="#" data-section="compat">合盘分析</a>
                 <a href="#" data-section="health">健康预测</a>
                 <a href="#" data-section="ai-analysis">AI综合分析</a>
             </nav>
@@ -49,131 +50,129 @@
                             <button type="button" class="btn btn-secondary btn-settings" id="btn-open-settings">系统设置</button>
                         </div>
                         <form id="bazi-form">
-                            <div class="stepper" id="input-stepper">
-                                <button type="button" class="step-chip active" data-step-to="1">1. 基础信息</button>
-                                <button type="button" class="step-chip" data-step-to="2">2. 出生地与校准</button>
-                            </div>
-
-                            <div class="step-panel active" data-step-panel="1">
-                                <div class="form-row form-core-row">
-                                    <div class="form-group">
-                                        <label for="profile-name">姓名 / 档案名称</label>
-                                        <input id="profile-name" type="text" placeholder="例如：张三 / 本人 / 案例A">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="gender">性别</label>
-                                        <select id="gender">
-                                            <option value="male">男</option>
-                                            <option value="female">女</option>
-                                        </select>
-                                    </div>
+                            <div class="form-row form-core-row">
+                                <div class="form-group">
+                                    <label for="profile-name">姓名 / 档案名称</label>
+                                    <input id="profile-name" type="text" placeholder="例如：张三 / 本人 / 案例A">
                                 </div>
-                                <div class="form-row form-core-row">
-                                    <div class="form-group">
-                                        <label for="calendar-type">录入历法</label>
-                                        <select id="calendar-type">
-                                            <option value="solar" selected>公历</option>
-                                            <option value="lunar">农历</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="birth-year">出生年份</label>
-                                        <select id="birth-year"></select>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="birth-month">出生月份（农历含闰）</label>
-                                        <select id="birth-month"></select>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="birth-day">出生日期</label>
-                                        <select id="birth-day"></select>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="birth-time">出生时间</label>
-                                        <input id="birth-time" type="time" value="09:30">
-                                    </div>
-                                    <input id="lunar-leap" type="hidden" value="0">
+                                <div class="form-group">
+                                    <label for="gender">性别</label>
+                                    <select id="gender">
+                                        <option value="male">男</option>
+                                        <option value="female">女</option>
+                                    </select>
                                 </div>
-                                <div id="date-validation-tip" class="input-tip muted">日期联动已启用：农历月份会自动判断闰月并校验大小月。</div>
-                                <div id="time-boundary-tip" class="input-tip muted">节气敏感提示会在这里实时显示。</div>
-                                <div class="form-actions">
-                                    <button type="button" class="btn btn-primary" id="btn-step-next">下一步：出生地定位</button>
+                                <div class="form-group">
+                                    <label for="profile-group">档案分组</label>
+                                    <input id="profile-group" type="text" placeholder="例如：家人 / 客户 / 团队">
                                 </div>
                             </div>
 
-                            <div class="step-panel" data-step-panel="2">
-                                <div class="form-row form-core-row">
-                                    <div class="form-group form-group-wide-xl">
-                                        <label for="geo-query">出生地定位（市/县/医院）</label>
-                                        <input id="geo-query" type="text" list="geo-suggestions" placeholder="请输入出生市/县/医院">
-                                        <datalist id="geo-suggestions"></datalist>
-                                    </div>
-                                    <div class="form-group">
-                                        <label>&nbsp;</label>
-                                        <button type="button" class="btn btn-secondary" id="btn-geo-search">定位并校准</button>
-                                    </div>
+                            <div class="form-row form-core-row">
+                                <div class="form-group">
+                                    <label for="calendar-type">录入历法</label>
+                                    <select id="calendar-type">
+                                        <option value="solar" selected>公历</option>
+                                        <option value="lunar">农历</option>
+                                    </select>
                                 </div>
-                                <div id="geo-status" class="input-tip muted">尚未定位。可直接输入城市名或医院名称进行检索。</div>
+                                <div class="form-group">
+                                    <label for="birth-year">出生年份</label>
+                                    <select id="birth-year"></select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="birth-month">出生月份（农历含闰）</label>
+                                    <select id="birth-month"></select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="birth-day">出生日期</label>
+                                    <select id="birth-day"></select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="birth-time">出生时间</label>
+                                    <input id="birth-time" type="time" value="09:30">
+                                </div>
+                                <input id="lunar-leap" type="hidden" value="0">
+                            </div>
 
-                                <details id="advanced-settings" class="accordion">
-                                    <summary>⚙️ 高级排盘设置</summary>
-                                    <div class="accordion-content">
-                                        <div class="form-row">
-                                            <div class="form-group">
-                                                <label for="birth-region">常用出生地（手动）</label>
-                                                <select id="birth-region"></select>
-                                            </div>
-                                            <div class="form-group">
-                                                <label for="birth-longitude">经度微调（东正西负）</label>
-                                                <input id="birth-longitude" type="number" step="0.0001" min="-180" max="180" value="121.47">
-                                            </div>
-                                            <div class="form-group">
-                                                <label for="solar-time-mode">时刻采用方式</label>
-                                                <select id="solar-time-mode">
-                                                    <option value="auto">自动判断</option>
-                                                    <option value="standard">标准时间</option>
-                                                    <option value="trueSolar">真太阳时</option>
-                                                </select>
-                                            </div>
-                                            <div class="form-group">
-                                                <label for="day-boundary-sect">日柱换日流派</label>
-                                                <select id="day-boundary-sect">
-                                                    <option value="1" selected>子初换日（23:00 后算次日）</option>
-                                                    <option value="2">子正换日（00:00 后算次日）</option>
-                                                    <option value="3">夜子时分日（日按当日，子时按次日）</option>
-                                                </select>
-                                            </div>
-                                            <div class="form-group">
-                                                <label for="yun-sect">起运流派</label>
-                                                <select id="yun-sect">
-                                                    <option value="2" selected>分钟折算（更细）</option>
-                                                    <option value="1">时辰折算（传统）</option>
-                                                </select>
-                                            </div>
-                                            <div class="form-group">
-                                                <label for="timezone-offset">时区</label>
-                                                <select id="timezone-offset">
-                                                    <option value="8" selected>UTC+8（中国标准时间）</option>
-                                                    <option value="9">UTC+9</option>
-                                                    <option value="7">UTC+7</option>
-                                                    <option value="0">UTC+0</option>
-                                                    <option value="-5">UTC-5</option>
-                                                </select>
-                                            </div>
-                                            <div class="form-group">
-                                                <label for="target-year">分析基准年</label>
-                                                <select id="target-year"></select>
-                                            </div>
+                            <div id="date-validation-tip" class="input-tip muted">日期联动已启用：农历月份会自动判断闰月并校验大小月。</div>
+                            <div id="time-boundary-tip" class="input-tip muted">节气敏感提示会在这里实时显示。</div>
+
+                            <details id="location-settings" class="accordion">
+                                <summary>📍 出生地与真太阳时校准（可选）</summary>
+                                <div class="accordion-content">
+                                    <div class="form-row form-core-row">
+                                        <div class="form-group form-group-wide-xl">
+                                            <label for="geo-query">出生地定位（市/县/医院）</label>
+                                            <input id="geo-query" type="text" list="geo-suggestions" placeholder="请输入出生市/县/医院">
+                                            <datalist id="geo-suggestions"></datalist>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>&nbsp;</label>
+                                            <button type="button" class="btn btn-secondary" id="btn-geo-search">定位并校准</button>
                                         </div>
                                     </div>
-                                </details>
+                                    <div id="geo-status" class="input-tip muted">尚未定位。可直接输入城市名或医院名称进行检索。</div>
 
-                                <div class="form-actions">
-                                    <button type="button" class="btn btn-secondary" id="btn-step-prev">返回上一步</button>
-                                    <button type="submit" class="btn btn-primary">开始排盘测算</button>
-                                    <button type="button" class="btn btn-secondary" id="btn-example">载入示例</button>
-                                    <button type="button" class="btn btn-secondary" id="btn-save">保存到本地</button>
+                                    <details id="advanced-settings" class="accordion">
+                                        <summary>⚙️ 高级排盘设置</summary>
+                                        <div class="accordion-content">
+                                            <div class="form-row">
+                                                <div class="form-group">
+                                                    <label for="birth-region">常用出生地（手动）</label>
+                                                    <select id="birth-region"></select>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="birth-longitude">经度微调（东正西负）</label>
+                                                    <input id="birth-longitude" type="number" step="0.0001" min="-180" max="180" value="121.47">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="solar-time-mode">时刻采用方式</label>
+                                                    <select id="solar-time-mode">
+                                                        <option value="auto">自动判断</option>
+                                                        <option value="standard">标准时间</option>
+                                                        <option value="trueSolar">真太阳时</option>
+                                                    </select>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="day-boundary-sect">日柱换日流派</label>
+                                                    <select id="day-boundary-sect">
+                                                        <option value="1" selected>子初换日（23:00 后算次日）</option>
+                                                        <option value="2">子正换日（00:00 后算次日）</option>
+                                                        <option value="3">夜子时分日（日按当日，子时按次日）</option>
+                                                    </select>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="yun-sect">起运流派</label>
+                                                    <select id="yun-sect">
+                                                        <option value="2" selected>分钟折算（更细）</option>
+                                                        <option value="1">时辰折算（传统）</option>
+                                                    </select>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="timezone-offset">时区</label>
+                                                    <select id="timezone-offset">
+                                                        <option value="8" selected>UTC+8（中国标准时间）</option>
+                                                        <option value="9">UTC+9</option>
+                                                        <option value="7">UTC+7</option>
+                                                        <option value="0">UTC+0</option>
+                                                        <option value="-5">UTC-5</option>
+                                                    </select>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="target-year">分析基准年</label>
+                                                    <select id="target-year"></select>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </details>
                                 </div>
+                            </details>
+
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">开始排盘测算</button>
+                                <button type="button" class="btn btn-secondary" id="btn-example">载入示例</button>
+                                <button type="button" class="btn btn-secondary" id="btn-save">保存到本地</button>
                             </div>
                         </form>
                     </div>
@@ -197,7 +196,25 @@
                                 <h3>本地档案</h3>
                                 <button type="button" class="btn-link" id="btn-clear-storage">清空</button>
                             </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="profile-group-filter">按分组筛选</label>
+                                    <select id="profile-group-filter">
+                                        <option value="all">全部分组</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-actions">
+                                <button type="button" class="btn btn-secondary" id="btn-export-all-data">导出全部数据</button>
+                                <button type="button" class="btn btn-secondary" id="btn-import-all-data">导入恢复</button>
+                                <input id="all-data-file" type="file" accept=".json" hidden>
+                            </div>
                             <div id="saved-profiles" class="saved-profiles"></div>
+                            <div class="form-actions pager-row">
+                                <button type="button" class="btn btn-secondary" id="btn-profiles-prev">上一页</button>
+                                <span id="profiles-page-info" class="muted pager-info">第 1 页</span>
+                                <button type="button" class="btn btn-secondary" id="btn-profiles-next">下一页</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -231,102 +248,13 @@
                         </div>
                     </div>
                     <div id="life-events-list" class="pair-grid"></div>
+                    <div class="form-actions pager-row">
+                        <button type="button" class="btn btn-secondary" id="btn-life-events-prev">上一页</button>
+                        <span id="life-events-page-info" class="muted pager-info">第 1 页</span>
+                        <button type="button" class="btn btn-secondary" id="btn-life-events-next">下一页</button>
+                    </div>
                 </div>
 
-                <div class="card">
-                    <div class="saved-head">
-                        <h2>合盘对象录入</h2>
-                        <label class="switch-row" for="compat-enabled">
-                            <input id="compat-enabled" type="checkbox">
-                            <span>启用合盘 / 合婚分析</span>
-                        </label>
-                    </div>
-                    <form id="compat-form">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="compat-name">对象名称</label>
-                                <input id="compat-name" type="text" placeholder="例如：伴侣 / 对方 / 合作对象">
-                            </div>
-                            <div class="form-group">
-                                <label for="compat-calendar-type">录入历法</label>
-                                <select id="compat-calendar-type">
-                                    <option value="solar" selected>公历</option>
-                                    <option value="lunar">农历</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="compat-year">出生年份</label>
-                                <select id="compat-year"></select>
-                            </div>
-                            <div class="form-group">
-                                <label for="compat-month">出生月份（农历含闰）</label>
-                                <select id="compat-month"></select>
-                            </div>
-                            <div class="form-group">
-                                <label for="compat-day">出生日期</label>
-                                <select id="compat-day"></select>
-                            </div>
-                            <input id="compat-lunar-leap" type="hidden" value="0">
-                            <div class="form-group">
-                                <label for="compat-time">出生时间</label>
-                                <input id="compat-time" type="time" value="20:15">
-                            </div>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="compat-region">常用出生地</label>
-                                <select id="compat-region"></select>
-                            </div>
-                            <div class="form-group">
-                                <label for="compat-longitude">经度（东正西负）</label>
-                                <input id="compat-longitude" type="number" step="0.01" min="-180" max="180" value="121.47">
-                            </div>
-                            <div class="form-group">
-                                <label for="compat-solar-time-mode">时刻采用方式</label>
-                                <select id="compat-solar-time-mode">
-                                    <option value="auto">自动判断</option>
-                                    <option value="standard">标准时间</option>
-                                    <option value="trueSolar">真太阳时</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="compat-day-boundary-sect">日柱换日流派</label>
-                                <select id="compat-day-boundary-sect">
-                                    <option value="1" selected>子初换日</option>
-                                    <option value="2">子正换日</option>
-                                    <option value="3">夜子时分日</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="compat-gender">性别</label>
-                                <select id="compat-gender">
-                                    <option value="male">男</option>
-                                    <option value="female">女</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="compat-timezone-offset">时区</label>
-                                <select id="compat-timezone-offset">
-                                    <option value="8" selected>UTC+8</option>
-                                    <option value="9">UTC+9</option>
-                                    <option value="7">UTC+7</option>
-                                    <option value="0">UTC+0</option>
-                                    <option value="-5">UTC-5</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group form-group-wide-xl">
-                                <label>合盘对象时间预览</label>
-                                <div id="compat-preview" class="preview-panel"></div>
-                            </div>
-                            <div class="form-group">
-                                <label>&nbsp;</label>
-                                <button type="button" class="btn btn-secondary" id="btn-compat-example">载入合盘示例</button>
-                            </div>
-                        </div>
-                    </form>
-                </div>
             </section>
 
             <section id="section-bazi" class="section">
@@ -379,6 +307,40 @@
                     <h2>神煞与结构白话</h2>
                     <div id="shensha-analysis" class="pair-grid"></div>
                 </div>
+
+                <div class="card">
+                    <h2>八字反查（研究模式）</h2>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="reverse-year-pillar">年柱</label>
+                            <input id="reverse-year-pillar" type="text" placeholder="如：甲子">
+                        </div>
+                        <div class="form-group">
+                            <label for="reverse-month-pillar">月柱</label>
+                            <input id="reverse-month-pillar" type="text" placeholder="如：乙丑">
+                        </div>
+                        <div class="form-group">
+                            <label for="reverse-day-pillar">日柱</label>
+                            <input id="reverse-day-pillar" type="text" placeholder="如：丙寅">
+                        </div>
+                        <div class="form-group">
+                            <label for="reverse-time-pillar">时柱</label>
+                            <input id="reverse-time-pillar" type="text" placeholder="如：丁卯">
+                        </div>
+                        <div class="form-group">
+                            <label for="reverse-start-year">起始年份</label>
+                            <input id="reverse-start-year" type="number" min="1900" max="2099" value="1990">
+                        </div>
+                        <div class="form-group">
+                            <label for="reverse-end-year">结束年份</label>
+                            <input id="reverse-end-year" type="number" min="1900" max="2099" value="2005">
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary" id="btn-reverse-search">开始反查</button>
+                    </div>
+                    <div id="reverse-lookup-result" class="pair-grid"></div>
+                </div>
             </section>
 
             <section id="section-dayun" class="section">
@@ -399,21 +361,30 @@
                 </div>
                 <div class="card">
                     <h2>运势走势图</h2>
-                    <canvas id="fortune-chart" width="1200" height="320"></canvas>
+                    <div class="chart-scroll">
+                        <canvas id="fortune-chart" width="1200" height="320"></canvas>
+                    </div>
                 </div>
                 <div class="card">
                     <h2>人生路书（0 - 80 岁）</h2>
-                    <canvas id="life-roadmap-chart" width="1200" height="360"></canvas>
-                    <div id="life-roadmap-summary" class="pair-grid"></div>
+                    <div class="chart-scroll chart-overlay-shell">
+                        <canvas id="life-roadmap-chart" width="1200" height="360"></canvas>
+                        <div id="life-roadmap-overlay" class="chart-overlay"></div>
+                    </div>
+                    <div id="life-roadmap-summary" class="pair-grid roadmap-summary"></div>
                 </div>
                 <div class="card">
                     <h2>年度专题走势图</h2>
-                    <canvas id="year-domain-chart" width="1200" height="340"></canvas>
+                    <div class="chart-scroll">
+                        <canvas id="year-domain-chart" width="1200" height="340"></canvas>
+                    </div>
                     <div id="year-events" class="pair-grid"></div>
                 </div>
                 <div class="card">
                     <h2>月度专题走势图</h2>
-                    <canvas id="month-domain-chart" width="1200" height="340"></canvas>
+                    <div class="chart-scroll">
+                        <canvas id="month-domain-chart" width="1200" height="340"></canvas>
+                    </div>
                     <div id="month-events" class="pair-grid"></div>
                 </div>
                 <div class="grid-2">
@@ -468,6 +439,139 @@
                 </div>
             </section>
 
+            <section id="section-compat" class="section">
+                <div class="grid-2">
+                    <div class="card">
+                        <div class="saved-head">
+                            <h2>合盘对象录入</h2>
+                            <label class="switch-row" for="compat-enabled">
+                                <input id="compat-enabled" type="checkbox">
+                                <span>启用合盘 / 合婚分析</span>
+                            </label>
+                        </div>
+                        <form id="compat-form">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="compat-name">对象名称</label>
+                                    <input id="compat-name" type="text" placeholder="例如：伴侣 / 对方 / 合作对象">
+                                </div>
+                                <div class="form-group">
+                                    <label for="compat-calendar-type">录入历法</label>
+                                    <select id="compat-calendar-type">
+                                        <option value="solar" selected>公历</option>
+                                        <option value="lunar">农历</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="compat-mode">合盘模式</label>
+                                    <select id="compat-mode">
+                                        <option value="couple" selected>情侣 / 合婚</option>
+                                        <option value="business">商业合伙</option>
+                                        <option value="family">家庭亲子</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="compat-year">出生年份</label>
+                                    <select id="compat-year"></select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="compat-month">出生月份（农历含闰）</label>
+                                    <select id="compat-month"></select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="compat-day">出生日期</label>
+                                    <select id="compat-day"></select>
+                                </div>
+                                <input id="compat-lunar-leap" type="hidden" value="0">
+                                <div class="form-group">
+                                    <label for="compat-time">出生时间</label>
+                                    <input id="compat-time" type="time" value="20:15">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="compat-region">常用出生地</label>
+                                    <select id="compat-region"></select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="compat-longitude">经度（东正西负）</label>
+                                    <input id="compat-longitude" type="number" step="0.01" min="-180" max="180" value="121.47">
+                                </div>
+                                <div class="form-group">
+                                    <label for="compat-solar-time-mode">时刻采用方式</label>
+                                    <select id="compat-solar-time-mode">
+                                        <option value="auto">自动判断</option>
+                                        <option value="standard">标准时间</option>
+                                        <option value="trueSolar">真太阳时</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="compat-day-boundary-sect">日柱换日流派</label>
+                                    <select id="compat-day-boundary-sect">
+                                        <option value="1" selected>子初换日</option>
+                                        <option value="2">子正换日</option>
+                                        <option value="3">夜子时分日</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="compat-gender">性别</label>
+                                    <select id="compat-gender">
+                                        <option value="male">男</option>
+                                        <option value="female">女</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="compat-timezone-offset">时区</label>
+                                    <select id="compat-timezone-offset">
+                                        <option value="8" selected>UTC+8</option>
+                                        <option value="9">UTC+9</option>
+                                        <option value="7">UTC+7</option>
+                                        <option value="0">UTC+0</option>
+                                        <option value="-5">UTC-5</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group form-group-wide-xl">
+                                    <label>合盘对象时间预览</label>
+                                    <div id="compat-preview" class="preview-panel"></div>
+                                </div>
+                                <div class="form-group">
+                                    <label>&nbsp;</label>
+                                    <div class="form-actions">
+                                        <button type="button" class="btn btn-secondary" id="btn-compat-example">载入合盘示例</button>
+                                        <button type="button" class="btn btn-secondary" id="btn-save-compat-profile">保存组合模板</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="card">
+                        <h2>合盘模板库（双人组合）</h2>
+                        <div id="compat-profiles-list" class="saved-profiles"></div>
+                        <div class="form-actions pager-row">
+                            <button type="button" class="btn btn-secondary" id="btn-compat-profiles-prev">上一页</button>
+                            <span id="compat-profiles-page-info" class="muted pager-info">第 1 页</span>
+                            <button type="button" class="btn btn-secondary" id="btn-compat-profiles-next">下一页</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>合盘 / 合婚总览</h2>
+                    <div class="chart-scroll">
+                        <canvas id="compatibility-chart" width="1200" height="320"></canvas>
+                    </div>
+                    <div id="compatibility-analysis" class="pair-grid"></div>
+                </div>
+                <div class="card">
+                    <h2>双人运势同框趋势</h2>
+                    <div class="chart-scroll">
+                        <canvas id="compatibility-trend-chart" width="1200" height="320"></canvas>
+                    </div>
+                </div>
+            </section>
+
             <section id="section-health" class="section">
                 <div class="grid-2">
                     <div class="card">
@@ -476,7 +580,9 @@
                     </div>
                     <div class="card">
                         <h2>脏腑健康指数</h2>
-                        <canvas id="health-chart" width="1200" height="320"></canvas>
+                        <div class="chart-scroll">
+                            <canvas id="health-chart" width="1200" height="320"></canvas>
+                        </div>
                     </div>
                 </div>
                 <div class="grid-2">
@@ -492,12 +598,16 @@
                 <div class="grid-2">
                     <div class="card">
                         <h2>年度健康曲线</h2>
-                        <canvas id="year-health-chart" width="1200" height="320"></canvas>
+                        <div class="chart-scroll">
+                            <canvas id="year-health-chart" width="1200" height="320"></canvas>
+                        </div>
                         <div id="year-health-notes" class="pair-grid"></div>
                     </div>
                     <div class="card">
                         <h2>月度健康曲线</h2>
-                        <canvas id="month-health-chart" width="1200" height="320"></canvas>
+                        <div class="chart-scroll">
+                            <canvas id="month-health-chart" width="1200" height="320"></canvas>
+                        </div>
                         <div id="month-health-notes" class="pair-grid"></div>
                     </div>
                 </div>
@@ -562,6 +672,10 @@
                         <textarea id="llm-prompt-template" rows="8" placeholder="这里可以调整大模型的人设、输出格式和分析要求。"></textarea>
                     </div>
                     <div id="llm-status" class="preview-panel"></div>
+                    <div id="kb-reindex-progress" class="reindex-progress hidden">
+                        <div class="progress"><span id="kb-reindex-progress-bar" style="width:0%"></span></div>
+                        <p id="kb-reindex-progress-text" class="muted">0%</p>
+                    </div>
                 </div>
                 <div class="card">
                     <h2>AI综合命理分析报告</h2>
@@ -604,11 +718,6 @@
                 <div class="card">
                     <h2>六亲与子嗣</h2>
                     <div id="family-analysis-grid" class="pair-grid"></div>
-                </div>
-                <div class="card">
-                    <h2>合盘 / 合婚</h2>
-                    <canvas id="compatibility-chart" width="1200" height="320"></canvas>
-                    <div id="compatibility-analysis" class="pair-grid"></div>
                 </div>
                 <div class="card">
                     <h2>本地知识库</h2>
@@ -679,6 +788,12 @@
         </div>
     </div>
 
+    <div class="floating-tools" id="floating-tools">
+        <button type="button" class="btn btn-secondary" id="btn-scroll-top">返回顶部</button>
+        <button type="button" class="btn btn-secondary" id="btn-float-export">导出报告</button>
+        <button type="button" class="btn btn-secondary" id="btn-float-print">打印</button>
+    </div>
+
     <script src="js/vendor/lunar.js"></script>
     <script src="js/bazi-core.js?v=20260311"></script>
     <script src="js/bazi-analysis.js?v=20260311"></script>
@@ -687,6 +802,7 @@
     <script src="js/health.js?v=20260311"></script>
     <script src="js/ai-engine.js?v=20260311"></script>
     <script src="js/llm-client.js?v=20260311"></script>
+    <script src="js/local-db.js?v=20260311"></script>
     <script src="js/knowledge-base.js?v=20260311"></script>
     <script src="js/charts.js?v=20260311"></script>
     <script src="js/app.js?v=20260311"></script>

@@ -1271,6 +1271,7 @@
         const risky = [...list]
             .sort((a, b) => b.riskScore - a.riskScore)
             .slice(0, 8)
+            .sort((a, b) => a.year - b.year)
             .map((item) => ({
                 year: item.year,
                 pillar: item.pillar,
@@ -1283,6 +1284,7 @@
         const favorable = [...list]
             .sort((a, b) => b.chanceScore - a.chanceScore)
             .slice(0, 8)
+            .sort((a, b) => a.year - b.year)
             .map((item) => ({
                 year: item.year,
                 pillar: item.pillar,
@@ -1292,59 +1294,65 @@
         return { risky, favorable };
     }
 
+    function pickTopChronological(rows, scoreFn, limit = 4, asc = false) {
+        return [...(rows || [])]
+            .sort((a, b) => asc ? scoreFn(a) - scoreFn(b) : scoreFn(b) - scoreFn(a))
+            .slice(0, limit)
+            .sort((a, b) => (a.year ?? a.month ?? 0) - (b.year ?? b.month ?? 0));
+    }
+
     function buildEventDashboard(chart, yearEvaluations, monthEvaluations) {
         const years = yearEvaluations || [];
         const months = monthEvaluations || [];
-        const marriageWindows = [...years]
-            .sort((a, b) => b.evaluation.scores.relation - a.evaluation.scores.relation)
-            .slice(0, 4)
+        const marriageWindows = pickTopChronological(years, (item) => item.evaluation.scores.relation, 4, false)
             .map((item) => ({
                 year: item.year,
                 pillar: item.pillar,
                 note: `关系分 ${item.evaluation.scores.relation}，${item.evaluation.opportunities[0]}`
             }));
-        const marriageRisk = [...years]
+        const marriageRisk = pickTopChronological(
+            [...years]
             .filter((item) =>
                 item.evaluation.scores.relation <= 62
                 || (item.evaluation.timing?.hit || []).some((hit) => hit.focus.includes("夫妻宫"))
                 || (item.evaluation.palaceTriggers || []).some((entry) => entry.palace === "夫妻宫" && entry.relationType !== "六合")
-            )
-            .sort((a, b) => a.evaluation.scores.relation - b.evaluation.scores.relation)
-            .slice(0, 4)
+            ),
+            (item) => item.evaluation.scores.relation,
+            4,
+            true
+        )
             .map((item) => ({
                 year: item.year,
                 pillar: item.pillar,
                 note: (item.evaluation.palaceTriggers || []).find((entry) => entry.palace === "夫妻宫" && entry.relationType !== "六合")?.note || item.evaluation.risks[0]
             }));
-        const wealthPeaks = [...years]
-            .sort((a, b) => b.evaluation.scores.wealth - a.evaluation.scores.wealth)
-            .slice(0, 4)
+        const wealthPeaks = pickTopChronological(years, (item) => item.evaluation.scores.wealth, 4, false)
             .map((item) => ({
                 year: item.year,
                 pillar: item.pillar,
                 note: `财运分 ${item.evaluation.scores.wealth}，${item.evaluation.opportunities[0]}`
             }));
-        const wealthPits = [...years]
-            .sort((a, b) => a.evaluation.scores.wealth - b.evaluation.scores.wealth)
-            .slice(0, 4)
+        const wealthPits = pickTopChronological(years, (item) => item.evaluation.scores.wealth, 4, true)
             .map((item) => ({
                 year: item.year,
                 pillar: item.pillar,
                 note: item.evaluation.risks[0]
             }));
-        const healthTraffic = [...months]
-            .sort((a, b) => a.evaluation.scores.health - b.evaluation.scores.health)
-            .slice(0, 4)
+        const healthTraffic = pickTopChronological(months, (item) => item.evaluation.scores.health, 4, true)
             .map((item) => ({
                 month: item.month,
                 pillar: item.pillar,
                 level: item.evaluation.scores.health <= 58 ? "红灯" : item.evaluation.scores.health <= 66 ? "黄灯" : "绿灯",
                 note: item.evaluation.risks[0]
             }));
-        const warningRadar = [...years]
+        const warningRadar = pickTopChronological(
+            [...years]
             .filter((item) => (item.evaluation.specialAlerts || []).length)
-            .sort((a, b) => (b.evaluation.specialAlerts || []).length - (a.evaluation.specialAlerts || []).length)
-            .slice(0, 5)
+            ,
+            (item) => (item.evaluation.specialAlerts || []).length,
+            5,
+            false
+        )
             .map((item) => ({
                 year: item.year,
                 pillar: item.pillar,
@@ -1437,16 +1445,25 @@
                 : evalResult.scores.overall <= 58 || avoidHit
                     ? "慎"
                     : "平";
+            const keyRisk = evalResult.specialAlerts?.find((entry) => entry.level !== "chance")?.text
+                || evalResult.palaceTriggers?.find((entry) => entry.relationType !== "六合")?.note
+                || evalResult.risks?.[0];
+            const keyChance = evalResult.specialAlerts?.find((entry) => entry.level === "chance")?.text
+                || evalResult.opportunities?.[0];
+            const neutralKey = [evalResult.opportunities?.[0], evalResult.risks?.[0]].filter(Boolean).slice(0, 2).join("；");
+            const leadGod = evalResult.cycle?.god ? `${evalResult.cycle.god}` : "当日气机";
             rows.push({
                 date: solar.toYmd(),
                 pillar,
                 score: evalResult.scores.overall,
                 level,
                 note: level === "宜"
-                    ? evalResult.opportunities[0]
+                    ? `今日${leadGod}主事：${keyChance || "原局用神受生，适合推进关键事项。"}`
                     : level === "慎"
-                        ? evalResult.risks[0]
-                        : "以稳为主，按计划推进。"
+                        ? `今日${leadGod}偏压：${keyRisk || "刑冲信号偏强，重大决策建议延后。"}`
+                        : neutralKey
+                            ? `今日${leadGod}中性：${neutralKey}`
+                            : `今日${leadGod}平衡，适合做整理、复盘与收口。`
             });
         }
         return rows;
