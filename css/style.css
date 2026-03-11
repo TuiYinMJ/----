@@ -157,7 +157,7 @@ a { color: inherit; text-decoration: none; }
 
 .grid-2 {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
     gap: 20px;
 }
 
@@ -490,8 +490,14 @@ textarea {
 
 .pair-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
     gap: 12px;
+}
+
+canvas {
+    width: 100%;
+    height: auto;
+    display: block;
 }
 
 .branch-board {
@@ -758,6 +764,26 @@ textarea {
 
     .daily-calendar-grid {
         grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 768px) {
+    .form-row {
+        grid-template-columns: 1fr !important;
+        gap: 12px;
+    }
+
+    .form-group,
+    .form-group-wide,
+    .form-group-wide-xl {
+        grid-column: span 1 !important;
+        width: 100%;
+    }
+
+    select,
+    input,
+    textarea {
+        width: 100%;
     }
 }
 

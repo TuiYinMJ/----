@@ -43,7 +43,16 @@
         驿马: "驿马主变动、外出、迁移、出差、跳槽和空间转换。好处是动中生机，坏处是动得太频繁也累。",
         羊刃: "羊刃是力量太硬的信号。好处是敢冲、敢扛、能顶压，坏处是容易用力过猛，带来冲突、伤病或手术主题。",
         魁罡: "魁罡强调刚、硬、极端和不服输。好处是有骨头、有执行，坏处是过刚则折，不容易转弯。",
-        空亡: "空亡不是绝对没有，而是事情容易出现落空、延迟、预期有但落地慢，或阶段性白忙的感觉。"
+        空亡: "空亡不是绝对没有，而是事情容易出现落空、延迟、预期有但落地慢，或阶段性白忙的感觉。",
+        红鸾: "红鸾是偏“婚喜、人缘、关系推进”的信号，往往在恋爱、订婚、结婚、社交曝光期更明显。",
+        天喜: "天喜是喜庆和关系升温信号，常见于感情定局、家庭喜事、对外关系缓和。",
+        大耗: "大耗强调财务流失、资金消耗和预算失控风险，最怕冲动投资和情绪消费。",
+        十恶大败: "十恶大败多见“账面看起来有，落地却留不住”的破耗结构，财务上必须先防守再扩张。",
+        孤辰: "孤辰强调个人独行和情感疏离，优点是自立，风险是关系里不愿示弱。",
+        寡宿: "寡宿强调感情节奏偏慢或偏冷，容易晚婚、慢热，关系推进需要更高沟通成本。",
+        天德贵人: "天德贵人偏“逢凶化吉”，遇到硬冲硬克时更容易遇见台阶和转圜空间。",
+        月德贵人: "月德贵人偏“人和与善后能力”，有助于缓冲关系冲突与现实压力。",
+        天月二德: "天月二德同见，通常意味着危机中仍有解法，但前提是愿意守规则、走正路。"
     };
     const TEN_GOD_EFFECTS = {
         比肩: { gift: "自己做主、扛事、能硬顶", risk: "固执、好胜、资源不让", work: "适合自己掌控节奏", relation: "容易谁都不让谁" },
@@ -97,6 +106,20 @@
         "申-巳": "水",
         "午-未": "土"
     };
+    const DI_SHI_EFFECTS = {
+        长生: { overall: 2, health: 2, relation: 1, note: "长生主生发，适合启动和恢复。" },
+        沐浴: { relation: 2, career: -1, overall: 0, note: "沐浴主桃花和波动，宜谨慎决策关系。" },
+        冠带: { career: 2, overall: 1, note: "冠带主形象与承担，利于上台面。" },
+        临官: { career: 3, wealth: 1, overall: 2, note: "临官主掌控力，利于拿项目和职位。" },
+        帝旺: { career: 2, wealth: 2, health: -1, overall: 2, note: "帝旺主高压高能，成事快也易过火。" },
+        衰: { overall: -1, health: -1, note: "衰位主回落，适合减速和复盘。" },
+        病: { health: -3, overall: -2, note: "病位主负荷过重，优先保身体与情绪。" },
+        死: { health: -4, family: -2, overall: -3, note: "死位主停滞与断点，不宜硬攻。" },
+        墓: { overall: -2, wealth: -1, family: -1, note: "墓位主收敛，适合储备与止损。" },
+        绝: { overall: -4, relation: -3, health: -3, note: "绝位主断裂，关系财务都要防突发。" },
+        胎: { overall: 1, family: 2, note: "胎位主孕育，利于准备和新规划。" },
+        养: { overall: 1, health: 1, family: 1, note: "养位主修复，利于慢养和重建。"}
+    };
 
     function stat(stats, key) {
         return stats[key] || 0;
@@ -112,6 +135,67 @@
 
     function getTenGod(dayGan, targetGan) {
         return LunarUtil.SHI_SHEN[dayGan + targetGan];
+    }
+
+    function getCycleDiShi(dayGan, branch) {
+        const offset = LunarUtil.CHANG_SHENG_OFFSET[dayGan];
+        const zhiIndex = BaziCore.BRANCHES.indexOf(branch);
+        const dayGanIndex = BaziCore.STEMS.indexOf(dayGan);
+        if (!Number.isFinite(offset) || zhiIndex < 0 || dayGanIndex < 0) return "";
+        let index = offset + (dayGanIndex % 2 === 0 ? zhiIndex : -zhiIndex);
+        if (index >= 12) index -= 12;
+        if (index < 0) index += 12;
+        return LunarUtil.CHANG_SHENG[index] || "";
+    }
+
+    function applyDiShiScores(scores, dayGan, branch) {
+        const diShi = getCycleDiShi(dayGan, branch);
+        const effect = DI_SHI_EFFECTS[diShi];
+        if (!effect) return { diShi, effect: null };
+        Object.entries(effect).forEach(([key, value]) => {
+            if (key === "note") return;
+            scores[key] += value;
+        });
+        return { diShi, effect };
+    }
+
+    function getNaYinElement(nayin) {
+        const text = String(nayin || "");
+        if (text.includes("木")) return "木";
+        if (text.includes("火")) return "火";
+        if (text.includes("土")) return "土";
+        if (text.includes("金")) return "金";
+        if (text.includes("水")) return "水";
+        return "";
+    }
+
+    function getNaYinInteraction(chart, pillarText) {
+        const cycleNayin = LunarUtil.NAYIN[pillarText] || "";
+        const cycleElement = getNaYinElement(cycleNayin);
+        const dayNayin = chart.pillars[2].nayin || "";
+        const dayElement = getNaYinElement(dayNayin);
+        let delta = 0;
+        let relation = "中性";
+        if (cycleElement && dayElement) {
+            if (cycleElement === dayElement) {
+                relation = "同气";
+                delta = 1.8;
+            } else if (BaziCore.generateElement(cycleElement) === dayElement || BaziCore.generateElement(dayElement) === cycleElement) {
+                relation = "相生";
+                delta = 1.4;
+            } else if (BaziCore.controlElement(cycleElement) === dayElement || BaziCore.controlElement(dayElement) === cycleElement) {
+                relation = "相克";
+                delta = -2;
+            }
+        }
+        return {
+            cycleNayin,
+            cycleElement,
+            dayNayin,
+            dayElement,
+            relation,
+            delta
+        };
     }
 
     function elementBonus(chart, element) {
@@ -304,6 +388,59 @@
         return { positives: positives.slice(0, 2), negatives: negatives.slice(0, 3) };
     }
 
+    function getPalaceNameByLabel(label) {
+        if (label === "日柱") return "夫妻宫";
+        if (label === "时柱") return "子女宫";
+        if (label === "月柱") return "父母宫/事业宫";
+        return "祖上宫/外缘宫";
+    }
+
+    function buildPalaceTriggers(relationSignals, scope) {
+        const severityMap = { 相冲: 3, 相穿: 4, 相破: 3, 相刑: 3, 自刑: 2, 相害: 2, 六合: 1 };
+        const triggers = relationSignals.map((signal) => {
+            const palace = getPalaceNameByLabel(signal.label);
+            const relationType = signal.relation.type;
+            const severity = severityMap[relationType] || 1;
+            const note = relationType === "六合"
+                ? `${palace}被合，事项更容易推进，宜顺势定规则。`
+                : `${palace}被${relationType}，${scope}是该宫位的引动窗口。`;
+            return {
+                palace,
+                relationType,
+                severity,
+                note,
+                label: signal.label
+            };
+        }).sort((a, b) => b.severity - a.severity);
+        return triggers;
+    }
+
+    function applyPalaceTriggerScores(scores, palaceTriggers) {
+        palaceTriggers.forEach((trigger) => {
+            if (trigger.relationType === "六合") {
+                if (trigger.palace === "夫妻宫") scores.relation += 2;
+                if (trigger.palace === "子女宫") scores.family += 2;
+                if (trigger.palace === "父母宫/事业宫") scores.career += 2;
+                scores.overall += 1;
+                return;
+            }
+            if (trigger.palace === "夫妻宫") {
+                scores.relation -= trigger.severity * 1.2;
+                scores.family -= trigger.severity * 0.5;
+            } else if (trigger.palace === "子女宫") {
+                scores.family -= trigger.severity;
+                scores.relation -= trigger.severity * 0.5;
+            } else if (trigger.palace === "父母宫/事业宫") {
+                scores.career -= trigger.severity;
+                scores.family -= trigger.severity * 0.45;
+            } else {
+                scores.family -= trigger.severity * 0.6;
+                scores.health -= trigger.severity * 0.4;
+            }
+            scores.overall -= trigger.severity * 0.7;
+        });
+    }
+
     function evaluateTimingTriggers(chart, branch) {
         const triggers = chart.timingTriggers || [];
         const hit = triggers.filter((item) => item.triggerBranches.includes(branch));
@@ -353,25 +490,37 @@
         const notesNegative = [];
         const combos = [];
         const avoid = chart.structure.yongshen?.avoid || [];
+        const stemSupports = [];
         const branchPool = [...chart.pillars.map((item) => item.branch)];
         if (dayun) {
             branchPool.push(dayun.branch);
             shift[getStemElement(dayun.stem)] += 0.7;
             shift[getBranchElement(dayun.branch)] += 0.55;
+            stemSupports.push(getStemElement(dayun.stem));
         }
         if (cycle) {
             branchPool.push(cycle.branch);
             shift[getStemElement(cycle.stem)] += 0.95;
             shift[getBranchElement(cycle.branch)] += 0.75;
+            stemSupports.push(getStemElement(cycle.stem));
         }
+        let reconstructed = false;
 
         [...BaziCore.SAN_HE, ...BaziCore.SAN_HUI].forEach((group) => {
             const full = group.branches.every((branch) => branchPool.includes(branch));
             if (!full || !cycle || !group.branches.includes(cycle.branch)) return;
             const amount = BaziCore.SAN_HE.includes(group) ? 2.45 : 2.1;
-            shift[group.element] += amount;
+            const stemMatch = stemSupports.includes(group.element);
+            shift[group.element] += stemMatch ? amount + 1.2 : amount;
             const withDayun = dayun && group.branches.includes(dayun.branch);
-            combos.push({ type: BaziCore.SAN_HE.includes(group) ? "三合局" : "三会方", element: group.element, branches: group.branches.join(""), withDayun });
+            combos.push({
+                type: BaziCore.SAN_HE.includes(group) ? "三合局" : "三会方",
+                element: group.element,
+                branches: group.branches.join(""),
+                withDayun,
+                stemMatch
+            });
+            if (stemMatch) reconstructed = true;
             if (group.element === chart.structure.usefulElement || group.element === chart.structure.supportiveElement) {
                 notesPositive.push(`岁运引动 ${group.branches.join("")}${BaziCore.SAN_HE.includes(group) ? "三合" : "三会"}${group.element}局，原局气势被重构，属于关键转折窗口。`);
             }
@@ -389,13 +538,28 @@
             }
         }
 
+        const reconstructedWuxing = Object.fromEntries(Object.entries(chart.wuxing).map(([element, value]) => {
+            const adjusted = Math.max(0, value + (shift[element] || 0) * (reconstructed ? 1.28 : 0.9));
+            return [element, Number(adjusted.toFixed(3))];
+        }));
+        const dominantElement = Object.entries(reconstructedWuxing).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+        if (reconstructed) {
+            if (avoid.includes(dominantElement)) {
+                notesNegative.push(`岁运合化后出现“变盘”倾向，${dominantElement}气主导，且落在忌神侧。`);
+            } else {
+                notesPositive.push(`岁运合化后出现“变盘”倾向，${dominantElement}气主导，适合借势重构路径。`);
+            }
+        }
         const majorShift = combos.some((item) => item.element === chart.structure.usefulElement || avoid.includes(item.element));
         return {
             shift,
             combos,
             positive: notesPositive.slice(0, 2),
             negative: notesNegative.slice(0, 2),
-            majorShift
+            majorShift,
+            reconstructed,
+            reconstructedWuxing,
+            dominantElement
         };
     }
 
@@ -507,6 +671,7 @@
             scores.family += bonus * 0.75;
             scores.health += bonus * 0.7;
         });
+        const diShiImpact = applyDiShiScores(scores, dayGan, branch);
         if (chart.structure.strength === "身强" && cycleElements.includes(chart.structure.dayElement)) {
             scores.health -= 4;
             scores.relation -= 2;
@@ -527,6 +692,16 @@
             scores.relation -= 3;
             scores.family -= 2;
         }
+        const nayinInteraction = getNaYinInteraction(chart, pillarText);
+        if (nayinInteraction.delta > 0) {
+            scores.overall += nayinInteraction.delta;
+            scores.wealth += nayinInteraction.delta * 0.8;
+            scores.relation += nayinInteraction.delta * 0.6;
+        } else if (nayinInteraction.delta < 0) {
+            scores.overall += nayinInteraction.delta;
+            scores.relation += nayinInteraction.delta * 0.8;
+            scores.health += nayinInteraction.delta * 0.6;
+        }
         const dynamicEco = buildDynamicCycleEco(chart, pillarText, context);
         Object.entries(dynamicEco.shift).forEach(([element, amount]) => {
             if (!amount) return;
@@ -546,8 +721,21 @@
                 scores.overall -= amount * 1.6;
             }
         });
+        if (dynamicEco.reconstructed) {
+            if ((chart.structure.yongshen?.avoid || []).includes(dynamicEco.dominantElement)) {
+                scores.overall -= 4;
+                scores.wealth -= 3;
+                scores.relation -= 2;
+            } else {
+                scores.overall += 3;
+                scores.career += 2;
+                scores.wealth += 2;
+            }
+        }
         const relationSignals = collectCycleRelations(chart, branch);
         applyCycleRelationScores(scores, relationSignals);
+        const palaceTriggers = buildPalaceTriggers(relationSignals, scope);
+        applyPalaceTriggerScores(scores, palaceTriggers);
         const timing = evaluateTimingTriggers(chart, branch);
         scores.relation += timing.scoreDelta.relation;
         scores.career += timing.scoreDelta.career;
@@ -581,12 +769,19 @@
             meta,
             scores,
             gods,
+            diShi: diShiImpact.diShi,
+            diShiEffect: diShiImpact.effect,
+            nayinInteraction,
+            palaceTriggers,
             opportunities: [
                 ...outcome.opportunities,
                 ...relationNotes.positives,
                 ...elementProfile.positive,
                 ...dynamicEco.positive,
                 ...timing.supportNotes,
+                ...(diShiImpact.effect && ["长生", "冠带", "临官", "帝旺", "胎", "养"].includes(diShiImpact.diShi) ? [`十二长生落在${diShiImpact.diShi}：${diShiImpact.effect.note}`] : []),
+                ...(nayinInteraction.relation === "同气" || nayinInteraction.relation === "相生" ? [`纳音${nayinInteraction.relation}（${nayinInteraction.cycleNayin} ↔ ${nayinInteraction.dayNayin}），隐性助力更明显。`] : []),
+                ...palaceTriggers.filter((item) => item.relationType === "六合").map((item) => `${item.palace}被六合引动，属于可推进窗口。`),
                 ...specialAlerts.filter((item) => item.level === "chance").map((item) => item.text)
             ].slice(0, 7),
             risks: [
@@ -595,6 +790,9 @@
                 ...elementProfile.negative,
                 ...dynamicEco.negative,
                 ...timing.riskNotes,
+                ...(diShiImpact.effect && ["病", "死", "墓", "绝", "衰"].includes(diShiImpact.diShi) ? [`十二长生落在${diShiImpact.diShi}：${diShiImpact.effect.note}`] : []),
+                ...(nayinInteraction.relation === "相克" ? [`纳音相克（${nayinInteraction.cycleNayin} ↔ ${nayinInteraction.dayNayin}），今年隐性阻力较强。`] : []),
+                ...palaceTriggers.filter((item) => item.relationType !== "六合").slice(0, 2).map((item) => `${item.palace}引动：${item.note}`),
                 ...specialAlerts.filter((item) => item.level !== "chance").map((item) => item.text)
             ].slice(0, 8),
             relationSignals,
@@ -1076,8 +1274,11 @@
             .map((item) => ({
                 year: item.year,
                 pillar: item.pillar,
-                reason: item.evaluation.specialAlerts?.find((entry) => entry.level !== "chance")?.text || item.evaluation.risks[0] || item.evaluation.blunt,
-                focus: item.evaluation.timing?.hit?.[0]?.focus || "综合"
+                reason: item.evaluation.specialAlerts?.find((entry) => entry.level !== "chance")?.text
+                    || item.evaluation.palaceTriggers?.find((entry) => entry.relationType !== "六合")?.note
+                    || item.evaluation.risks[0]
+                    || item.evaluation.blunt,
+                focus: item.evaluation.timing?.hit?.[0]?.focus || item.evaluation.palaceTriggers?.[0]?.palace || "综合"
             }));
         const favorable = [...list]
             .sort((a, b) => b.chanceScore - a.chanceScore)
@@ -1103,13 +1304,17 @@
                 note: `关系分 ${item.evaluation.scores.relation}，${item.evaluation.opportunities[0]}`
             }));
         const marriageRisk = [...years]
-            .filter((item) => item.evaluation.scores.relation <= 62 || (item.evaluation.timing?.hit || []).some((hit) => hit.focus.includes("夫妻宫")))
+            .filter((item) =>
+                item.evaluation.scores.relation <= 62
+                || (item.evaluation.timing?.hit || []).some((hit) => hit.focus.includes("夫妻宫"))
+                || (item.evaluation.palaceTriggers || []).some((entry) => entry.palace === "夫妻宫" && entry.relationType !== "六合")
+            )
             .sort((a, b) => a.evaluation.scores.relation - b.evaluation.scores.relation)
             .slice(0, 4)
             .map((item) => ({
                 year: item.year,
                 pillar: item.pillar,
-                note: item.evaluation.risks[0]
+                note: (item.evaluation.palaceTriggers || []).find((entry) => entry.palace === "夫妻宫" && entry.relationType !== "六合")?.note || item.evaluation.risks[0]
             }));
         const wealthPeaks = [...years]
             .sort((a, b) => b.evaluation.scores.wealth - a.evaluation.scores.wealth)
@@ -1143,7 +1348,10 @@
             .map((item) => ({
                 year: item.year,
                 pillar: item.pillar,
-                note: (item.evaluation.specialAlerts || []).map((entry) => entry.type).join("、")
+                note: [
+                    (item.evaluation.specialAlerts || []).map((entry) => entry.type).join("、"),
+                    (item.evaluation.palaceTriggers || []).find((entry) => entry.relationType !== "六合")?.palace
+                ].filter(Boolean).join(" · ")
             }));
         return {
             marriageWindows,

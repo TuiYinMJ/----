@@ -445,6 +445,7 @@
     }
 
     function bindEvents() {
+        let resizeTimer = null;
         document.querySelectorAll(".nav-links a").forEach((link) => {
             link.addEventListener("click", (event) => {
                 event.preventDefault();
@@ -490,6 +491,12 @@
         });
         document.addEventListener("keydown", (event) => {
             if (event.key === "Escape") closeSettingsModal();
+        });
+        window.addEventListener("resize", () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                if (state.current) renderAll();
+            }, 120);
         });
         ["llm-provider", "llm-workflow-mode", "llm-stream-mode", "llm-base-url", "llm-api-key", "llm-model", "embedding-model", "llm-prompt-template"].forEach((id) => {
             $(id).addEventListener("change", persistAiConfigFromForm);
@@ -1106,6 +1113,12 @@
             ...chart.transformations.stemCombos.filter((item) => item.success).map((item) => `${item.pair}->${item.element}`),
             ...chart.transformations.branchCombos.filter((item) => item.success).map((item) => `${item.type}${item.element}`)
         ].join("；") || "当前无明确合化改气";
+        const nayinTop = (chart.nayinMatrix?.pairs || [])
+            .slice()
+            .sort((a, b) => Math.abs(b.score) - Math.abs(a.score))
+            .slice(0, 2)
+            .map((item) => `${item.pair}${item.relation}`)
+            .join("、") || "纳音关系中性";
         const blindText = chart.blindPatterns.findings.length
             ? chart.blindPatterns.findings.slice(0, 2).map((item) => `${item.type} ${item.pair}（${item.focus}）`).join("；")
             : chart.blindPatterns.summary;
@@ -1119,6 +1132,7 @@
             { title: "月令与节气", body: `${chart.seasonal.season}令 · ${chart.seasonal.jieQi.prevName}后 ${chart.seasonal.jieQi.passedDays} 天 / ${chart.seasonal.jieQi.nextName}前 ${chart.seasonal.jieQi.remainingDays} 天 · 司令 ${commanderText}` },
             { title: "格局与根气", body: `${chart.structure.pattern.finalPattern} · 日主${chart.structure.strength}（强弱比 ${chart.structure.strengthScore}） · 日主根气 ${chart.roots.dayMasterRootStrength}` },
             { title: "合化与改气", body: transformText },
+            { title: "纳音隐层", body: `${nayinTop} · 纳音总分 ${chart.nayinMatrix?.score ?? 0}` },
             { title: "盲派断点", body: blindText },
             { title: "起运设置", body: `起运流派 ${chart.input.yunSect === 2 ? "分钟折算" : "时辰折算"} · 起运日期约 ${dayun.startSolar}` }
         ];
@@ -1279,6 +1293,7 @@
                 <p class="blunt">${item.evaluation.blunt}</p>
                 <p class="good-text">可能发生：${item.evaluation.opportunities[0]}</p>
                 <p class="bad-text">需要注意：${item.evaluation.risks[0]}</p>
+                ${(item.evaluation.palaceTriggers || []).length ? `<p class="bad-text">宫位引动：${item.evaluation.palaceTriggers[0].palace} · ${item.evaluation.palaceTriggers[0].relationType}</p>` : ""}
                 ${(item.evaluation.specialAlerts || []).length ? `<p class="bad-text">雷达预警：${item.evaluation.specialAlerts.map((entry) => entry.type).join("、")}</p>` : ""}
             </div>
         `).join("")}</div>`;
@@ -1289,6 +1304,7 @@
                 <p class="blunt">${item.evaluation.blunt}</p>
                 <p class="good-text">可能发生：${item.evaluation.opportunities[0]}</p>
                 <p class="bad-text">需要注意：${item.evaluation.risks[0]}</p>
+                ${(item.evaluation.palaceTriggers || []).length ? `<p class="bad-text">宫位引动：${item.evaluation.palaceTriggers[0].palace} · ${item.evaluation.palaceTriggers[0].relationType}</p>` : ""}
                 ${(item.evaluation.specialAlerts || []).length ? `<p class="bad-text">雷达预警：${item.evaluation.specialAlerts.map((entry) => entry.type).join("、")}</p>` : ""}
             </div>
         `).join("")}</div>`;

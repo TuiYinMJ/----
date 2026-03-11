@@ -1003,12 +1003,67 @@
         };
     }
 
+    function getNaYinElement(nayin) {
+        const text = String(nayin || "");
+        if (text.includes("木")) return "木";
+        if (text.includes("火")) return "火";
+        if (text.includes("土")) return "土";
+        if (text.includes("金")) return "金";
+        if (text.includes("水")) return "水";
+        return "";
+    }
+
+    function buildNaYinMatrix(pillars) {
+        const pairs = [];
+        let score = 0;
+        for (let i = 0; i < pillars.length; i++) {
+            for (let j = i + 1; j < pillars.length; j++) {
+                const left = pillars[i];
+                const right = pillars[j];
+                const leftElement = getNaYinElement(left.nayin);
+                const rightElement = getNaYinElement(right.nayin);
+                let relation = "中性";
+                let delta = 0;
+                if (leftElement && rightElement) {
+                    if (leftElement === rightElement) {
+                        relation = "同气";
+                        delta = 1.5;
+                    } else if (generateElement(rightElement) === leftElement || generateElement(leftElement) === rightElement) {
+                        relation = "相生";
+                        delta = 1.2;
+                    } else if (controlElement(leftElement) === rightElement || controlElement(rightElement) === leftElement) {
+                        relation = "相克";
+                        delta = -1.4;
+                    }
+                }
+                score += delta;
+                pairs.push({
+                    pair: `${left.label}-${right.label}`,
+                    left: `${left.stem}${left.branch}`,
+                    right: `${right.stem}${right.branch}`,
+                    leftNaYin: left.nayin,
+                    rightNaYin: right.nayin,
+                    leftElement,
+                    rightElement,
+                    relation,
+                    score: Number(delta.toFixed(2))
+                });
+            }
+        }
+        return {
+            pairs,
+            score: Number(score.toFixed(2))
+        };
+    }
+
     function getExpandedShensha(pillars) {
         const yearBranch = pillars[0].branch;
+        const monthBranch = pillars[1].branch;
         const dayBranch = pillars[2].branch;
         const dayStem = pillars[2].stem;
         const dayPillar = `${pillars[2].stem}${pillars[2].branch}`;
         const allBranches = pillars.map((pillar) => pillar.branch);
+        const allStems = pillars.map((pillar) => pillar.stem);
         const tags = [];
         const tianYi = {
             甲: ["丑", "未"], 戊: ["丑", "未"], 庚: ["丑", "未"],
@@ -1025,6 +1080,11 @@
             巳酉丑: "亥"
         };
         const yangRen = { 甲: "卯", 乙: "寅", 丙: "午", 丁: "巳", 戊: "午", 己: "巳", 庚: "酉", 辛: "申", 壬: "子", 癸: "亥" };
+        const hongLuan = { 子: "卯", 丑: "寅", 寅: "丑", 卯: "子", 辰: "亥", 巳: "戌", 午: "酉", 未: "申", 申: "未", 酉: "午", 戌: "巳", 亥: "辰" };
+        const tianXi = { 子: "酉", 丑: "申", 寅: "未", 卯: "午", 辰: "巳", 巳: "辰", 午: "卯", 未: "寅", 申: "丑", 酉: "子", 戌: "亥", 亥: "戌" };
+        const daHao = { 子: "未", 丑: "午", 寅: "巳", 卯: "辰", 辰: "卯", 巳: "寅", 午: "丑", 未: "子", 申: "亥", 酉: "戌", 戌: "酉", 亥: "申" };
+        const tianDeByMonth = { 寅: "丁", 卯: "申", 辰: "壬", 巳: "辛", 午: "亥", 未: "甲", 申: "癸", 酉: "寅", 戌: "丙", 亥: "乙", 子: "巳", 丑: "庚" };
+        const shiEDaBai = ["甲辰", "乙巳", "丙申", "丁亥", "戊戌", "己丑", "庚辰", "辛巳", "壬申", "癸亥"];
 
         if (["申", "子", "辰"].includes(dayBranch)) tags.push("华盖");
         if (["寅", "午", "戌"].includes(yearBranch)) tags.push("将星");
@@ -1039,6 +1099,34 @@
         if (allBranches.includes(yangRen[dayStem])) tags.push("羊刃");
         if (["庚辰", "庚戌", "壬辰", "戊戌"].includes(dayPillar)) tags.push("魁罡");
         if (pillars.some((pillar) => pillar.xunKong && pillar.xunKong !== "无")) tags.push("空亡");
+        if (allBranches.includes(hongLuan[yearBranch])) tags.push("红鸾");
+        if (allBranches.includes(tianXi[yearBranch])) tags.push("天喜");
+        if (allBranches.includes(daHao[yearBranch])) tags.push("大耗");
+        if (shiEDaBai.includes(dayPillar)) tags.push("十恶大败");
+        if (["亥", "子", "丑"].includes(yearBranch)) {
+            if (allBranches.includes("寅")) tags.push("孤辰");
+            if (allBranches.includes("戌")) tags.push("寡宿");
+        } else if (["寅", "卯", "辰"].includes(yearBranch)) {
+            if (allBranches.includes("巳")) tags.push("孤辰");
+            if (allBranches.includes("丑")) tags.push("寡宿");
+        } else if (["巳", "午", "未"].includes(yearBranch)) {
+            if (allBranches.includes("申")) tags.push("孤辰");
+            if (allBranches.includes("辰")) tags.push("寡宿");
+        } else if (["申", "酉", "戌"].includes(yearBranch)) {
+            if (allBranches.includes("亥")) tags.push("孤辰");
+            if (allBranches.includes("未")) tags.push("寡宿");
+        }
+        const tianDeToken = tianDeByMonth[monthBranch];
+        const hasTianDe = tianDeToken && (allStems.includes(tianDeToken) || allBranches.includes(tianDeToken));
+        if (hasTianDe) tags.push("天德贵人");
+        let yueDeStem = "";
+        if (["寅", "午", "戌"].includes(monthBranch)) yueDeStem = "丙";
+        if (["申", "子", "辰"].includes(monthBranch)) yueDeStem = "壬";
+        if (["亥", "卯", "未"].includes(monthBranch)) yueDeStem = "甲";
+        if (["巳", "酉", "丑"].includes(monthBranch)) yueDeStem = "庚";
+        const hasYueDe = yueDeStem && allStems.includes(yueDeStem);
+        if (hasYueDe) tags.push("月德贵人");
+        if (hasTianDe && hasYueDe) tags.push("天月二德");
         return [...new Set(tags)];
     }
 
@@ -1091,6 +1179,7 @@
         const branchRelations = analyzeBranchMatrix(pillars);
         const blindPatterns = analyzeBlindPatterns(pillars, branchRelations);
         const timingTriggers = buildTimingTriggers(pillars, branchRelations);
+        const nayinMatrix = buildNaYinMatrix(pillars);
         return {
             input,
             pillars,
@@ -1112,6 +1201,7 @@
             timingTriggers,
             shensha: getExpandedShensha(pillars),
             branchRelations,
+            nayinMatrix,
             solarMeta: preview.solarMeta,
             boundaryMeta: boundary.boundaryMeta,
             source: {

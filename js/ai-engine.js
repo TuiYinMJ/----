@@ -11,6 +11,7 @@
         "6. 如果知识库/RAG给了参考，请把它当作佐证，不要机械照抄。",
         "6.1 只要使用了知识库内容，必须在句末标注来源编号，如[引用1]；不可编造来源。",
         "6.2 如果 lifeEvents 提供了历史事件，请先做“校准复盘”，再输出未来判断。",
+        "6.3 严禁复读固定句式，必须基于输入数据动态组织语言。",
         "7. 输出结构固定为：总论、命局结构、格局与用神、当前大运、当前流年、当前流月、事业、财运、感情、家庭六亲、健康、行动建议。",
         "8. 语气要温和但直接，不套模板，不空泛，不神叨。"
     ].join("\n");
@@ -48,32 +49,57 @@
     }
 
     function buildReport(chart, dayun, currentYearEval, currentMonthEval, health) {
+        const dominantGods = chart.pillars
+            .flatMap((pillar) => [pillar.tenGod, ...pillar.tenGodZhi])
+            .reduce((acc, god) => {
+                acc[god] = (acc[god] || 0) + 1;
+                return acc;
+            }, {});
+        const topGods = Object.entries(dominantGods).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([god, count]) => `${god}×${count}`).join("、");
         return [
             {
-                title: "先说结论",
-                body: `${chart.pillars[2].stem}${chart.pillars[2].branch}日主，${chart.structure.strength}。当前主格按${chart.structure.pattern.finalPattern}处理，用神偏${chart.structure.usefulElement}，辅助取${chart.structure.supportiveElement}。当前处于${dayun.current.label}大运（${dayun.current.startYear}-${dayun.current.endYear}），整体属于“${currentYearEval.blunt}”的年份。`
+                title: "结构快照",
+                body: [
+                    `日主：${chart.pillars[2].stem}${chart.pillars[2].branch}（${chart.structure.strength}）`,
+                    `格局：${chart.structure.pattern.finalPattern}`,
+                    `用神：${chart.structure.usefulElement}（辅：${chart.structure.supportiveElement}）`,
+                    `当前大运：${dayun.current.label}（${dayun.current.startYear}-${dayun.current.endYear}）`,
+                    `主导十神：${topGods || "无"}`
+                ].join(" | ")
             },
             {
-                title: "命局关键点",
-                body: `月令主气在${chart.structure.commanderInfo.primaryStem}（${chart.structure.commanderInfo.primaryGod}），节气进度约 ${Math.round(chart.seasonal.jieQi.progress * 100)}%。${chart.structure.yongshen.rationale.join(" ")}`
+                title: "数据结论（流年）",
+                body: [
+                    `综合 ${currentYearEval.scores.overall}`,
+                    `事业 ${currentYearEval.scores.career}`,
+                    `财运 ${currentYearEval.scores.wealth}`,
+                    `感情 ${currentYearEval.scores.relation}`,
+                    `家庭 ${currentYearEval.scores.family}`,
+                    `健康 ${currentYearEval.scores.health}`,
+                    `十二长生：${currentYearEval.diShi || "未标记"}`
+                ].join(" | ")
             },
             {
-                title: "这一年的好处",
-                body: `有利面：${joinList(currentYearEval.opportunities)}`
+                title: "机会面",
+                body: joinList(currentYearEval.opportunities)
             },
             {
-                title: "这一年的风险",
-                body: `不利面：${joinList(currentYearEval.risks)}`
+                title: "风险面",
+                body: joinList(currentYearEval.risks)
             },
             {
-                title: "这个月最该防什么",
-                body: `${currentMonthEval.blunt} 可能发生：${joinList(currentMonthEval.opportunities)} 需要注意：${joinList(currentMonthEval.risks)}`
+                title: "数据结论（流月）",
+                body: [
+                    `综合 ${currentMonthEval.scores.overall}`,
+                    `机会 ${joinList(currentMonthEval.opportunities)}`,
+                    `风险 ${joinList(currentMonthEval.risks)}`
+                ].join(" | ")
             },
             {
-                title: "健康与执行",
+                title: "健康侧重点",
                 body: health.risks.length
-                    ? `健康侧重点落在${health.risks.slice(0, 2).map((item) => item.element).join("、")}。白话说，状态一掉，你最容易先从作息、情绪、消化或恢复力上出问题。`
-                    : "健康盘面不算失衡，但这不等于可以透支。长期习惯决定上限。"
+                    ? `${health.risks.slice(0, 2).map((item) => `${item.element}(${item.score})`).join("、")} | ${health.risks[0].risk}`
+                    : "当前健康结构相对均衡，建议保持作息与恢复节律。"
             }
         ];
     }
@@ -102,6 +128,30 @@
         ].join("；");
     }
 
+    function buildFactContext(state) {
+        const yearEval = state.currentYearEval || {};
+        const monthEval = state.currentMonthEval || {};
+        const clashSignals = (yearEval.relationSignals || [])
+            .filter((entry) => ["相冲", "相穿", "相破", "相刑", "自刑", "相害"].includes(entry.relation?.type))
+            .map((entry) => ({
+                palace: entry.label,
+                relation: entry.relation.type,
+                branches: `${entry.relation?.type || ""}:${entry.branch}`
+            }));
+        return {
+            dayMasterPhase: yearEval.diShi || state.chart.pillars?.[2]?.diShi || "",
+            wealthStarStrength: Number(((yearEval.scores?.wealth || 0) / 100).toFixed(3)),
+            careerStrength: Number(((yearEval.scores?.career || 0) / 100).toFixed(3)),
+            monthStrength: Number(((monthEval.scores?.overall || 0) / 100).toFixed(3)),
+            clashes: clashSignals,
+            palaceTriggers: yearEval.palaceTriggers || [],
+            majorShift: yearEval.dynamicEco?.majorShift || false,
+            transformedChart: yearEval.dynamicEco?.reconstructed ? yearEval.dynamicEco?.reconstructedWuxing : null,
+            transformedDominant: yearEval.dynamicEco?.dominantElement || "",
+            nayinInteraction: yearEval.nayinInteraction || null
+        };
+    }
+
     function buildCorePayload(state, references) {
         return {
             profileName: state.input.profileName,
@@ -119,9 +169,11 @@
             blindPatterns: state.chart.blindPatterns,
             timingTriggers: state.chart.timingTriggers,
             shensha: state.chart.shensha,
+            nayinMatrix: state.chart.nayinMatrix || null,
             dayun: state.dayun.current,
             currentYear: state.currentYearEval,
             currentMonth: state.currentMonthEval,
+            dynamicFacts: buildFactContext(state),
             health: state.health,
             family: state.family,
             compatibility: state.compatibility?.result || null,
@@ -142,7 +194,7 @@
         const payload = buildCorePayload(state, references);
         return [
             { role: "system", content: promptTemplate || DEFAULT_PROMPT_TEMPLATE },
-            { role: "user", content: `请基于以下 JSON 数据生成完整中文分析报告，不要复述“我无法确定”之类的空话。凡引用 references 中内容，必须使用 [引用n] 形式标注 citationId。\n${JSON.stringify(payload, null, 2)}` }
+            { role: "user", content: `请基于以下 JSON 数据生成完整中文分析报告，不要复述“我无法确定”之类的空话。凡引用 references 中内容，必须使用 [引用n] 形式标注 citationId。不要套模板句式，优先根据 dynamicFacts 做推演。\n${JSON.stringify(payload, null, 2)}` }
         ];
     }
 

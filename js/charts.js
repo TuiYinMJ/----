@@ -1,4 +1,22 @@
 (function () {
+    function getCanvasSize(canvas, fallbackWidth, fallbackHeight) {
+        const rect = canvas.getBoundingClientRect();
+        const width = Math.max(280, Math.round(rect.width || fallbackWidth || canvas.width || 800));
+        const ratio = (fallbackHeight || canvas.height || 320) / Math.max(fallbackWidth || canvas.width || 1200, 1);
+        const height = Math.max(180, Math.round(width * ratio));
+        return { width, height };
+    }
+
+    function setupCanvas(canvas, fallbackWidth, fallbackHeight) {
+        const ctx = canvas.getContext("2d");
+        const { width, height } = getCanvasSize(canvas, fallbackWidth, fallbackHeight);
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        return { ctx, width, height };
+    }
+
     function renderRadar(container, wuxing, colors) {
         const entries = Object.entries(wuxing);
         const max = Math.max(...entries.map(([, v]) => v), 1);
@@ -44,8 +62,9 @@
     }
 
     function drawMultiLineChart(canvas, series, labels) {
-        const ctx = canvas.getContext("2d");
-        const { width, height } = canvas;
+        const fallbackWidth = Number(canvas.getAttribute("width")) || 1200;
+        const fallbackHeight = Number(canvas.getAttribute("height")) || 320;
+        const { ctx, width, height } = setupCanvas(canvas, fallbackWidth, fallbackHeight);
         const padding = 48;
         const min = 35;
         const max = 95;
@@ -102,8 +121,9 @@
     }
 
     function drawBarChart(canvas, items) {
-        const ctx = canvas.getContext("2d");
-        const { width, height } = canvas;
+        const fallbackWidth = Number(canvas.getAttribute("width")) || 1200;
+        const fallbackHeight = Number(canvas.getAttribute("height")) || 320;
+        const { ctx, width, height } = setupCanvas(canvas, fallbackWidth, fallbackHeight);
         ctx.clearRect(0, 0, width, height);
         const barWidth = Math.min(120, (width - 120) / items.length);
         const max = 100;
@@ -123,8 +143,9 @@
     }
 
     function drawRoadmapChart(canvas, points, markers = []) {
-        const ctx = canvas.getContext("2d");
-        const { width, height } = canvas;
+        const fallbackWidth = Number(canvas.getAttribute("width")) || 1200;
+        const fallbackHeight = Number(canvas.getAttribute("height")) || 360;
+        const { ctx, width, height } = setupCanvas(canvas, fallbackWidth, fallbackHeight);
         const padding = 54;
         const min = 35;
         const max = 95;
