@@ -91,7 +91,10 @@
         calendarSelection: { year: null, month: null, selectedDate: null },
         storage: {
             aiConfig: null,
-            geoConfig: null
+            geoConfig: null,
+            profilesCache: [],
+            lifeEventsCache: [],
+            compatProfilesCache: []
         },
         paging: {
             profiles: { page: 1, pageSize: 12, total: 0 },
@@ -171,35 +174,48 @@
     }
 
     function loadLifeEvents() {
-        const rows = safeParse(localStorage.getItem(LIFE_EVENT_KEY), []);
-        return Array.isArray(rows) ? rows.filter((item) => item && item.id && item.year && item.type && item.note) : [];
+        return Array.isArray(state.storage.lifeEventsCache)
+            ? state.storage.lifeEventsCache
+                .filter((item) => item && item.id && item.year && item.type && item.note)
+                .map((item) => ({ ...item }))
+            : [];
     }
 
     function saveLifeEvents(events) {
-        const safe = (events || []).slice(0, 120);
-        localStorage.setItem(LIFE_EVENT_KEY, JSON.stringify(safe));
+        state.storage.lifeEventsCache = (events || [])
+            .filter((item) => item && item.id && item.year && item.type && item.note)
+            .slice(0, 120)
+            .map((item) => ({ ...item }));
     }
 
     function loadProfiles() {
-        const rows = safeParse(localStorage.getItem(STORAGE_KEY), []);
-        return Array.isArray(rows) ? rows : [];
+        return Array.isArray(state.storage.profilesCache)
+            ? state.storage.profilesCache.map((item) => ({ ...item }))
+            : [];
     }
 
     function saveProfiles(profiles) {
-        const safe = (profiles || []).slice(0, 200);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(safe));
+        const safe = (profiles || []).slice(0, 200).map((item) => ({ ...item }));
+        state.storage.profilesCache = safe;
         return safe;
     }
 
     function loadCompatProfiles() {
-        const rows = safeParse(localStorage.getItem(COMPAT_STORAGE_KEY), []);
-        return Array.isArray(rows) ? rows : [];
+        return Array.isArray(state.storage.compatProfilesCache)
+            ? state.storage.compatProfilesCache.map((item) => ({ ...item }))
+            : [];
     }
 
     function saveCompatProfiles(profiles) {
-        const safe = (profiles || []).slice(0, 240);
-        localStorage.setItem(COMPAT_STORAGE_KEY, JSON.stringify(safe));
+        const safe = (profiles || []).slice(0, 240).map((item) => ({ ...item }));
+        state.storage.compatProfilesCache = safe;
         return safe;
+    }
+
+    function clearLegacyBusinessStorage() {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(LIFE_EVENT_KEY);
+        localStorage.removeItem(COMPAT_STORAGE_KEY);
     }
 
     async function bootstrapStorage() {
@@ -214,17 +230,21 @@
             : [];
         state.storage.aiConfig = { ...defaultAiConfig(), ...(safeParse(localStorage.getItem(AI_CONFIG_KEY), {}) || {}) };
         state.storage.geoConfig = { ...defaultGeoConfig(), ...(safeParse(localStorage.getItem(GEO_CONFIG_KEY), {}) || {}) };
+        saveProfiles(localProfiles);
+        saveLifeEvents(localLifeEvents);
+        saveCompatProfiles(localCompatProfiles);
         state.paging.profiles.total = localProfiles.length;
         state.paging.lifeEvents.total = localLifeEvents.length;
         state.paging.compatProfiles.total = localCompatProfiles.length;
         if (!window.LocalDB?.available) return;
         await window.LocalDB.ready;
-        const [dbAi, dbGeo, profileCount, lifeEventCount, compatCount] = await Promise.all([
+        const [dbAi, dbGeo, profileCount, lifeEventCount, compatCount, dbLifeEvents] = await Promise.all([
             window.LocalDB.getKv(AI_CONFIG_KEY),
             window.LocalDB.getKv(GEO_CONFIG_KEY),
             window.LocalDB.countProfiles(),
             window.LocalDB.countLifeEvents(),
-            window.LocalDB.countCompatProfiles()
+            window.LocalDB.countCompatProfiles(),
+            window.LocalDB.listLifeEvents()
         ]);
         if (dbAi) state.storage.aiConfig = { ...defaultAiConfig(), ...(dbAi || {}) };
         else await window.LocalDB.setKv(AI_CONFIG_KEY, state.storage.aiConfig);
@@ -233,8 +253,10 @@
         if (!profileCount && localProfiles.length) await window.LocalDB.replaceProfiles(localProfiles);
         if (!lifeEventCount && localLifeEvents.length) await window.LocalDB.replaceLifeEvents(localLifeEvents);
         if (!compatCount && localCompatProfiles.length) await window.LocalDB.replaceCompatProfiles(localCompatProfiles);
+        saveLifeEvents(dbLifeEvents?.length ? dbLifeEvents : localLifeEvents);
+        clearLegacyBusinessStorage();
         state.paging.profiles.total = profileCount || localProfiles.length;
-        state.paging.lifeEvents.total = lifeEventCount || localLifeEvents.length;
+        state.paging.lifeEvents.total = (dbLifeEvents?.length ?? lifeEventCount) || localLifeEvents.length;
         state.paging.compatProfiles.total = compatCount || localCompatProfiles.length;
     }
 
@@ -908,13 +930,17 @@
     }
 
     async function removeLifeEvent(id) {
-        const next = loadLifeEvents().filter((item) => String(item.id) !== String(id));
-        saveLifeEvents(next);
         if (window.LocalDB?.available) {
             await window.LocalDB.removeLifeEvent(id);
+            saveLifeEvents((await window.LocalDB.listLifeEvents()) || []);
+            state.paging.lifeEvents.total = await window.LocalDB.countLifeEvents();
+        } else {
+            const next = loadLifeEvents().filter((item) => String(item.id) !== String(id));
+            saveLifeEvents(next);
+            state.paging.lifeEvents.total = next.length;
         }
         await renderLifeEvents();
-        if (state.current) state.current.lifeEvents = next;
+        if (state.current) state.current.lifeEvents = loadLifeEvents();
     }
 
     async function addLifeEventFromForm() {
@@ -931,21 +957,22 @@
             type,
             note
         };
-        const events = loadLifeEvents();
-        events.push(entry);
-        saveLifeEvents(events);
         if (window.LocalDB?.available) {
             await window.LocalDB.upsertLifeEvent(entry);
             const total = await window.LocalDB.countLifeEvents();
+            saveLifeEvents((await window.LocalDB.listLifeEvents()) || []);
             state.paging.lifeEvents.total = total;
             state.paging.lifeEvents.page = Math.max(1, Math.ceil(total / state.paging.lifeEvents.pageSize));
         } else {
+            const events = loadLifeEvents();
+            events.push(entry);
+            saveLifeEvents(events);
             state.paging.lifeEvents.total = events.length;
             state.paging.lifeEvents.page = Math.max(1, Math.ceil(events.length / state.paging.lifeEvents.pageSize));
         }
         $("life-event-note").value = "";
         await renderLifeEvents();
-        if (state.current) state.current.lifeEvents = events;
+        if (state.current) state.current.lifeEvents = loadLifeEvents();
     }
 
     function syncLunarLeap(config) {
@@ -2912,13 +2939,13 @@
             savedAt: Date.now(),
             input: state.current.input
         };
-        const profiles = loadProfiles();
-        profiles.unshift(row);
-        saveProfiles(profiles);
         if (window.LocalDB?.available) {
             await window.LocalDB.upsertProfile(row);
             state.paging.profiles.total = await window.LocalDB.countProfiles();
         } else {
+            const profiles = loadProfiles();
+            profiles.unshift(row);
+            saveProfiles(profiles);
             state.paging.profiles.total = profiles.length;
         }
         state.paging.profiles.page = 1;
@@ -3021,9 +3048,11 @@
     }
 
     async function clearProfiles() {
-        saveProfiles([]);
         if (window.LocalDB?.available) {
             await window.LocalDB.clearProfiles();
+            saveProfiles([]);
+        } else {
+            saveProfiles([]);
         }
         state.paging.profiles.total = 0;
         state.paging.profiles.page = 1;
@@ -3049,13 +3078,13 @@
             primaryInput,
             compatInput
         };
-        const profiles = loadCompatProfiles();
-        profiles.unshift(row);
-        saveCompatProfiles(profiles);
         if (window.LocalDB?.available) {
             await window.LocalDB.upsertCompatProfile(row);
             state.paging.compatProfiles.total = await window.LocalDB.countCompatProfiles();
         } else {
+            const profiles = loadCompatProfiles();
+            profiles.unshift(row);
+            saveCompatProfiles(profiles);
             state.paging.compatProfiles.total = profiles.length;
         }
         state.paging.compatProfiles.page = 1;
@@ -3117,12 +3146,12 @@
         });
         container.querySelectorAll("[data-compat-remove]").forEach((button) => {
             button.addEventListener("click", async () => {
-                const next = loadCompatProfiles().filter((item) => String(item.id) !== String(button.dataset.compatRemove));
-                saveCompatProfiles(next);
                 if (window.LocalDB?.available) {
                     await window.LocalDB.removeCompatProfile(button.dataset.compatRemove);
                     state.paging.compatProfiles.total = await window.LocalDB.countCompatProfiles();
                 } else {
+                    const next = loadCompatProfiles().filter((item) => String(item.id) !== String(button.dataset.compatRemove));
+                    saveCompatProfiles(next);
                     state.paging.compatProfiles.total = Math.max(0, state.paging.compatProfiles.total - 1);
                 }
                 await renderCompatibilityProfiles();
@@ -3141,14 +3170,21 @@
     }
 
     async function exportAllData() {
+        const [profiles, lifeEvents, compatProfiles] = window.LocalDB?.available
+            ? await Promise.all([
+                window.LocalDB.listProfiles(),
+                window.LocalDB.listLifeEvents(),
+                window.LocalDB.listCompatProfiles()
+            ])
+            : [loadProfiles(), loadLifeEvents(), loadCompatProfiles()];
         const payload = {
             version: 2,
             exportedAt: new Date().toISOString(),
             aiConfig: loadAiConfig(),
             geoConfig: loadGeoConfig(),
-            profiles: loadProfiles(),
-            lifeEvents: loadLifeEvents(),
-            compatProfiles: loadCompatProfiles(),
+            profiles,
+            lifeEvents,
+            compatProfiles,
             knowledgeEntries: KnowledgeBaseEngine.loadEntries()
         };
         if (window.LocalDB?.available) {
@@ -3175,11 +3211,28 @@
             const knowledgeEntries = Array.isArray(parsed.knowledgeEntries) ? parsed.knowledgeEntries : (parsed.indexedDb?.knowledge || []);
             saveAiConfig(aiConfig);
             saveGeoConfig(geoConfig);
-            saveProfiles(profiles || []);
-            saveLifeEvents(lifeEvents || []);
-            saveCompatProfiles(compatProfiles || []);
-            if (window.LocalDB?.available && parsed.indexedDb) {
-                await window.LocalDB.importAll(parsed.indexedDb, true);
+            if (window.LocalDB?.available) {
+                const payload = parsed.indexedDb
+                    ? parsed.indexedDb
+                    : {
+                        kv: {
+                            [AI_CONFIG_KEY]: aiConfig,
+                            [GEO_CONFIG_KEY]: geoConfig
+                        },
+                        profiles: profiles || [],
+                        lifeEvents: lifeEvents || [],
+                        compatProfiles: compatProfiles || [],
+                        knowledge: knowledgeEntries || []
+                    };
+                await window.LocalDB.importAll(payload, true);
+                saveLifeEvents(await window.LocalDB.listLifeEvents());
+                saveProfiles([]);
+                saveCompatProfiles([]);
+                clearLegacyBusinessStorage();
+            } else {
+                saveProfiles(profiles || []);
+                saveLifeEvents(lifeEvents || []);
+                saveCompatProfiles(compatProfiles || []);
             }
             if (Array.isArray(knowledgeEntries)) {
                 KnowledgeBaseEngine.saveEntries(knowledgeEntries);

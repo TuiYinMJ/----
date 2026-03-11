@@ -42,12 +42,13 @@
     ];
     let entryCache = null;
     let entryReady = false;
+    let persistQueue = Promise.resolve();
 
     function cloneSeed() {
         return SEED_ENTRIES.map((item) => ({ ...item }));
     }
 
-    function readLocalEntries() {
+    function readLegacyEntries() {
         try {
             const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
             if (!Array.isArray(parsed) || !parsed.length) return cloneSeed();
@@ -57,8 +58,13 @@
         }
     }
 
+    function clearLegacyEntries() {
+        localStorage.removeItem(STORAGE_KEY);
+    }
+
     async function hydrateFromIndexedDb() {
-        entryCache = readLocalEntries();
+        const legacy = readLegacyEntries();
+        entryCache = legacy;
         if (!window.LocalDB?.available) {
             entryReady = true;
             return entryCache;
@@ -68,14 +74,16 @@
         if (Array.isArray(dbRows) && dbRows.length) {
             entryCache = dbRows.map(normalizeEntry);
         } else {
-            await window.LocalDB.replaceKnowledgeEntries(entryCache);
+            await window.LocalDB.replaceKnowledgeEntries(legacy);
+            entryCache = legacy;
         }
+        clearLegacyEntries();
         entryReady = true;
         return entryCache;
     }
 
     const ready = hydrateFromIndexedDb().catch(() => {
-        entryCache = readLocalEntries();
+        entryCache = readLegacyEntries();
         entryReady = true;
         return entryCache;
     });
@@ -98,17 +106,22 @@
         if (entryCache && Array.isArray(entryCache)) {
             return entryCache.map(normalizeEntry);
         }
-        entryCache = readLocalEntries();
+        entryCache = cloneSeed();
         return entryCache.map(normalizeEntry);
+    }
+
+    function persistEntriesToIndexedDb(entries) {
+        if (!window.LocalDB?.available) return;
+        persistQueue = persistQueue
+            .catch(() => {})
+            .then(() => window.LocalDB.replaceKnowledgeEntries(entries))
+            .catch(() => {});
     }
 
     function saveEntries(entries) {
         const normalized = entries.map(normalizeEntry).slice(0, MAX_ENTRIES);
         entryCache = normalized;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-        if (window.LocalDB?.available) {
-            window.LocalDB.replaceKnowledgeEntries(normalized).catch(() => {});
-        }
+        persistEntriesToIndexedDb(normalized);
         return normalized;
     }
 
@@ -206,23 +219,67 @@
         return Array.from(tags).slice(0, 10);
     }
 
-    function splitLongText(value, maxLength = 1200) {
-        if (value.length <= maxLength) return [value];
+    function splitLongText(value, maxLength = 1200, overlapLength = 180) {
+        if (value.length <= maxLength) return [value.trim()];
+        const normalized = normalizeText(value);
+        const paragraphs = normalized.split(/\n{2,}/).map((part) => part.trim()).filter(Boolean);
+        if (!paragraphs.length) return [normalized];
         const chunks = [];
-        let cursor = 0;
-        while (cursor < value.length) {
-            const end = Math.min(cursor + maxLength, value.length);
-            let splitAt = Math.max(
-                value.lastIndexOf("。", end),
-                value.lastIndexOf("！", end),
-                value.lastIndexOf("？", end),
-                value.lastIndexOf("\n", end)
-            );
-            if (splitAt <= cursor + 240) splitAt = end;
-            const chunk = value.slice(cursor, splitAt).trim();
-            if (chunk) chunks.push(chunk);
-            cursor = splitAt;
+        let buffer = "";
+        for (const paragraph of paragraphs) {
+            const candidate = buffer ? `${buffer}\n\n${paragraph}` : paragraph;
+            if (candidate.length <= maxLength) {
+                buffer = candidate;
+                continue;
+            }
+            if (buffer) {
+                chunks.push(buffer.trim());
+                const overlap = buffer.slice(Math.max(0, buffer.length - overlapLength)).trim();
+                buffer = overlap ? `${overlap}\n\n${paragraph}` : paragraph;
+                if (buffer.length <= maxLength) continue;
+            }
+            let cursor = 0;
+            while (cursor < paragraph.length) {
+                const remaining = paragraph.length - cursor;
+                if (remaining <= 80) {
+                    const tail = paragraph.slice(cursor).trim();
+                    if (tail) {
+                        if (chunks.length && tail.length <= 80) {
+                            const merged = `${chunks[chunks.length - 1]}${tail}`;
+                            if (merged.length <= maxLength + 120) chunks[chunks.length - 1] = merged;
+                            else chunks.push(tail);
+                        } else {
+                            chunks.push(tail);
+                        }
+                    }
+                    break;
+                }
+                const end = Math.min(cursor + maxLength, paragraph.length);
+                let splitAt = Math.max(
+                    paragraph.lastIndexOf("。", end),
+                    paragraph.lastIndexOf("！", end),
+                    paragraph.lastIndexOf("？", end),
+                    paragraph.lastIndexOf("；", end),
+                    paragraph.lastIndexOf("，", end)
+                );
+                if (splitAt <= cursor + 260) splitAt = end;
+                const piece = paragraph.slice(cursor, splitAt).trim();
+                if (piece) {
+                    if (piece.length < 40 && chunks.length) {
+                        const merged = `${chunks[chunks.length - 1]}${piece}`;
+                        if (merged.length <= maxLength + 120) chunks[chunks.length - 1] = merged;
+                        else chunks.push(piece);
+                    } else {
+                        chunks.push(piece);
+                    }
+                }
+                const nextCursor = splitAt > cursor ? splitAt : Math.min(end + 1, paragraph.length);
+                if (nextCursor <= cursor) break;
+                cursor = nextCursor;
+            }
+            buffer = "";
         }
+        if (buffer.trim()) chunks.push(buffer.trim());
         return chunks;
     }
 
@@ -246,14 +303,16 @@
             });
         };
         lines.forEach((line) => {
-            if (headingRegex.test(line.trim()) && buffer.length) {
+            const trimmed = line.trim();
+            const isHeading = headingRegex.test(trimmed) && trimmed.length <= 32 && !/[，。！？；]/.test(trimmed);
+            if (isHeading && buffer.length) {
                 flush();
-                currentTitle = line.trim();
+                currentTitle = trimmed;
                 buffer = [];
                 return;
             }
-            if (headingRegex.test(line.trim())) {
-                currentTitle = line.trim();
+            if (isHeading) {
+                currentTitle = trimmed;
                 return;
             }
             buffer.push(line);

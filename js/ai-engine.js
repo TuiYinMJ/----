@@ -152,7 +152,147 @@
         };
     }
 
+    function roundScore(value) {
+        return Number(Number(value || 0).toFixed(3));
+    }
+
+    function slimPillars(pillars = []) {
+        return pillars.map((pillar) => ({
+            label: pillar.label,
+            stem: pillar.stem,
+            branch: pillar.branch,
+            tenGod: pillar.tenGod,
+            tenGodZhi: pillar.tenGodZhi,
+            diShi: pillar.diShi,
+            nayin: pillar.nayin
+        }));
+    }
+
+    function slimCycleEval(evaluation, metaLabel = "") {
+        if (!evaluation) return null;
+        return {
+            meta: metaLabel || evaluation.meta || evaluation.label || "",
+            scores: {
+                overall: roundScore(evaluation.scores?.overall),
+                career: roundScore(evaluation.scores?.career),
+                wealth: roundScore(evaluation.scores?.wealth),
+                relation: roundScore(evaluation.scores?.relation),
+                family: roundScore(evaluation.scores?.family),
+                health: roundScore(evaluation.scores?.health)
+            },
+            gods: (evaluation.gods || []).slice(0, 4),
+            diShi: evaluation.diShi || "",
+            palaceTriggers: (evaluation.palaceTriggers || []).slice(0, 3).map((item) => ({
+                palace: item.palace,
+                relationType: item.relationType,
+                severity: item.severity || 0
+            })),
+            alerts: (evaluation.specialAlerts || []).slice(0, 4).map((item) => ({
+                type: item.type,
+                level: item.level,
+                severity: item.severity || 0
+            })),
+            timing: {
+                hit: (evaluation.timing?.hit || []).slice(0, 2).map((item) => ({
+                    key: item.key,
+                    focus: item.focus
+                })),
+                release: (evaluation.timing?.release || []).slice(0, 2).map((item) => ({
+                    key: item.key,
+                    focus: item.focus
+                }))
+            },
+            dynamicEco: {
+                majorShift: Boolean(evaluation.dynamicEco?.majorShift),
+                dominantElement: evaluation.dynamicEco?.dominantElement || "",
+                reconstructed: Boolean(evaluation.dynamicEco?.reconstructed)
+            }
+        };
+    }
+
+    function buildExtremeSignals(state) {
+        const years = (state.allYearEvaluations || []).map((item) => ({
+            year: item.year,
+            pillar: item.pillar,
+            scores: item.evaluation?.scores || {},
+            riskCount: (item.evaluation?.specialAlerts || []).filter((entry) => entry.level !== "chance").length,
+            chanceCount: (item.evaluation?.specialAlerts || []).filter((entry) => entry.level === "chance").length,
+            palaceRisk: (item.evaluation?.palaceTriggers || []).some((entry) => entry.relationType !== "六合")
+        }));
+        const riskYears = [...years]
+            .filter((item) => item.scores.overall <= 64 || item.riskCount > 0 || item.palaceRisk || item.scores.health <= 58)
+            .sort((a, b) => (b.riskCount * 8 + (100 - b.scores.overall)) - (a.riskCount * 8 + (100 - a.scores.overall)))
+            .slice(0, 6)
+            .sort((a, b) => a.year - b.year)
+            .map((item) => ({
+                year: item.year,
+                pillar: item.pillar,
+                overall: roundScore(item.scores.overall),
+                health: roundScore(item.scores.health),
+                relation: roundScore(item.scores.relation),
+                riskCount: item.riskCount
+            }));
+        const chanceYears = [...years]
+            .filter((item) => item.scores.overall >= 70 || item.chanceCount > 0)
+            .sort((a, b) => (b.chanceCount * 7 + b.scores.overall) - (a.chanceCount * 7 + a.scores.overall))
+            .slice(0, 6)
+            .sort((a, b) => a.year - b.year)
+            .map((item) => ({
+                year: item.year,
+                pillar: item.pillar,
+                overall: roundScore(item.scores.overall),
+                career: roundScore(item.scores.career),
+                wealth: roundScore(item.scores.wealth),
+                chanceCount: item.chanceCount
+            }));
+        const months = (state.monthEvaluations || []).map((item) => ({
+            month: item.month,
+            pillar: item.pillar,
+            scores: item.evaluation?.scores || {},
+            riskCount: (item.evaluation?.specialAlerts || []).filter((entry) => entry.level !== "chance").length
+        }));
+        const riskMonths = [...months]
+            .filter((item) => item.scores.overall <= 62 || item.riskCount > 0 || item.scores.health <= 56)
+            .sort((a, b) => (b.riskCount * 8 + (100 - b.scores.overall)) - (a.riskCount * 8 + (100 - a.scores.overall)))
+            .slice(0, 3)
+            .map((item) => ({
+                month: item.month,
+                pillar: item.pillar,
+                overall: roundScore(item.scores.overall),
+                health: roundScore(item.scores.health),
+                relation: roundScore(item.scores.relation)
+            }));
+        const chanceMonths = [...months]
+            .filter((item) => item.scores.overall >= 72)
+            .sort((a, b) => b.scores.overall - a.scores.overall)
+            .slice(0, 3)
+            .map((item) => ({
+                month: item.month,
+                pillar: item.pillar,
+                overall: roundScore(item.scores.overall),
+                career: roundScore(item.scores.career),
+                wealth: roundScore(item.scores.wealth)
+            }));
+        return { riskYears, chanceYears, riskMonths, chanceMonths };
+    }
+
+    function buildReferencePayload(references = []) {
+        return (references || []).slice(0, 5).map((entry) => ({
+            citationId: entry.citationId || null,
+            citation: entry.citation || "",
+            title: entry.title,
+            tags: entry.tags,
+            source: entry.source,
+            locator: entry.locator || "",
+            excerpt: (entry.excerpt || entry.content || "").slice(0, 180)
+        }));
+    }
+
     function buildCorePayload(state, references) {
+        const factContext = buildFactContext(state);
+        const extremes = buildExtremeSignals(state);
+        const yearEval = slimCycleEval(state.currentYearEval, `${state.input.targetYear}年`);
+        const monthEval = slimCycleEval(state.currentMonthEval, `${state.currentMonthEval?.meta || ""}`);
         return {
             profileName: state.input.profileName,
             basic: {
@@ -161,32 +301,67 @@
                 solarBasis: state.chart.solarMeta.effectiveText,
                 usedTimeMode: state.chart.solarMeta.usedMode
             },
-            pillars: state.chart.pillars,
-            seasonal: state.chart.seasonal,
-            structure: state.chart.structure,
-            roots: state.chart.roots,
-            transformations: state.chart.transformations,
-            blindPatterns: state.chart.blindPatterns,
-            timingTriggers: state.chart.timingTriggers,
-            shensha: state.chart.shensha,
-            nayinMatrix: state.chart.nayinMatrix || null,
-            dayun: state.dayun.current,
-            currentYear: state.currentYearEval,
-            currentMonth: state.currentMonthEval,
-            dynamicFacts: buildFactContext(state),
-            health: state.health,
-            family: state.family,
-            compatibility: state.compatibility?.result || null,
-            lifeEvents: (state.lifeEvents || []).slice(0, 20),
-            references: references.map((entry) => ({
-                citationId: entry.citationId || null,
-                citation: entry.citation || "",
-                title: entry.title,
-                tags: entry.tags,
-                source: entry.source,
-                locator: entry.locator || "",
-                excerpt: (entry.excerpt || entry.content || "").slice(0, 360)
-            }))
+            pillars: slimPillars(state.chart.pillars),
+            structure: {
+                strength: state.chart.structure.strength,
+                strengthScore: state.chart.structure.strengthScore,
+                pattern: state.chart.structure.pattern?.finalPattern,
+                usefulElement: state.chart.structure.usefulElement,
+                supportiveElement: state.chart.structure.supportiveElement,
+                maxElement: state.chart.structure.maxElement,
+                minElement: state.chart.structure.minElement,
+                yongshenMethod: state.chart.structure.yongshen?.method || "",
+                avoid: state.chart.structure.yongshen?.avoid || []
+            },
+            seasonal: {
+                season: state.chart.seasonal?.season,
+                commander: state.chart.structure.commanderInfo
+                    ? {
+                        primaryStem: state.chart.structure.commanderInfo.primaryStem,
+                        primaryGod: state.chart.structure.commanderInfo.primaryGod,
+                        weights: state.chart.structure.commanderInfo.weights
+                    }
+                    : null
+            },
+            dayun: {
+                current: state.dayun.current?.label || "",
+                startYear: state.dayun.current?.startYear,
+                endYear: state.dayun.current?.endYear
+            },
+            dynamicFacts: {
+                dayMasterPhase: factContext.dayMasterPhase,
+                wealthStarStrength: factContext.wealthStarStrength,
+                careerStrength: factContext.careerStrength,
+                monthStrength: factContext.monthStrength,
+                clashes: factContext.clashes,
+                palaceTriggers: factContext.palaceTriggers,
+                majorShift: factContext.majorShift,
+                transformedDominant: factContext.transformedDominant,
+                nayinInteraction: factContext.nayinInteraction
+            },
+            currentYear: yearEval,
+            currentMonth: monthEval,
+            extremes,
+            health: {
+                risks: (state.health?.risks || []).slice(0, 4).map((item) => ({
+                    element: item.element,
+                    score: item.score,
+                    risk: item.risk
+                })),
+                suggestions: (state.health?.suggestions || []).slice(0, 4)
+            },
+            compatibility: state.compatibility?.result
+                ? {
+                    scores: state.compatibility.result.scores,
+                    mode: state.compatibility.input?.mode || ""
+                }
+                : null,
+            lifeEvents: (state.lifeEvents || []).slice(0, 10).map((item) => ({
+                year: item.year,
+                type: item.type,
+                note: String(item.note || "").slice(0, 120)
+            })),
+            references: buildReferencePayload(references)
         };
     }
 
@@ -194,7 +369,7 @@
         const payload = buildCorePayload(state, references);
         return [
             { role: "system", content: promptTemplate || DEFAULT_PROMPT_TEMPLATE },
-            { role: "user", content: `请基于以下 JSON 数据生成完整中文分析报告，不要复述“我无法确定”之类的空话。凡引用 references 中内容，必须使用 [引用n] 形式标注 citationId。不要套模板句式，优先根据 dynamicFacts 做推演。\n${JSON.stringify(payload, null, 2)}` }
+            { role: "user", content: `请基于以下 JSON 数据生成完整中文分析报告，不要复述“我无法确定”之类的空话。凡引用 references 中内容，必须使用 [引用n] 形式标注 citationId。只围绕 currentYear/currentMonth/extremes/dynamicFacts 的高置信信号展开，避免平庸项堆砌。\n${JSON.stringify(payload, null, 2)}` }
         ];
     }
 

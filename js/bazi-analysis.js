@@ -648,6 +648,97 @@
         });
     }
 
+    function applyPatternRuleOverrides(chart, scores, context = {}) {
+        const cycleElements = context.cycleElements || [];
+        const dynamicEco = context.dynamicEco || {};
+        const pattern = chart.structure?.pattern || {};
+        const specialPattern = pattern.specialPattern || null;
+        const patternName = String(pattern.finalPattern || "");
+        const positives = [];
+        const negatives = [];
+        const tags = [];
+        const avoid = chart.structure?.yongshen?.avoid || [];
+
+        if (patternName.includes("专旺")) {
+            const core = specialPattern?.orientation || chart.structure.dayElement;
+            const support = BaziCore.generateElement(core);
+            const hitCore = cycleElements.includes(core) || dynamicEco.dominantElement === core;
+            const hitSupport = cycleElements.includes(support) || dynamicEco.dominantElement === support;
+            if (hitCore || hitSupport) {
+                scores.career += 4;
+                scores.wealth += 3;
+                scores.relation += 1;
+                positives.push(`专旺结构在当前岁运得到同党承接（${core}/${support}），主轴可放大。`);
+                tags.push("专旺顺势");
+            }
+            const suppress = BaziCore.controlElement(core);
+            if (cycleElements.includes(suppress) || dynamicEco.dominantElement === suppress) {
+                scores.health -= 3;
+                scores.relation -= 2;
+                negatives.push(`专旺结构遇到克制主轴的${suppress}，做事容易从“强执行”转为“硬顶过头”。`);
+                tags.push("专旺受制");
+            }
+        }
+
+        if (patternName.includes("从")) {
+            const orientation = specialPattern?.orientation || chart.structure.usefulElement;
+            const anti = BaziCore.controlElement(orientation);
+            const follow = cycleElements.includes(orientation) || dynamicEco.dominantElement === orientation;
+            const against = cycleElements.includes(anti) || dynamicEco.dominantElement === anti;
+            if (follow) {
+                scores.career += 5;
+                scores.wealth += 5;
+                scores.family += 2;
+                positives.push(`从格结构在当前岁运顺着${orientation}走，取法可按“随势而行”处理。`);
+                tags.push("从格顺势");
+            }
+            if (against) {
+                scores.career -= 6;
+                scores.wealth -= 6;
+                scores.relation -= 3;
+                negatives.push(`从格结构被${anti}硬逆，最容易出现“旧逻辑失效、节奏失真”的断层。`);
+                tags.push("从格逆势");
+            }
+        }
+
+        if (dynamicEco.reconstructed) {
+            if (dynamicEco.dominantElement === chart.structure.usefulElement) {
+                scores.career += 3;
+                scores.wealth += 3;
+                positives.push(`岁运合化后主气转到用神${dynamicEco.dominantElement}，属于变盘后的可借力窗口。`);
+                tags.push("变盘顺用");
+            }
+            if (avoid.includes(dynamicEco.dominantElement)) {
+                scores.health -= 3;
+                scores.relation -= 3;
+                scores.family -= 2;
+                negatives.push(`岁运合化后主气落到忌神${dynamicEco.dominantElement}，属于变盘后的高压窗口。`);
+                tags.push("变盘忌神");
+            }
+        }
+
+        return { positives, negatives, tags };
+    }
+
+    function applyShortboardConstraint(scores) {
+        const minDomain = Math.min(scores.career, scores.wealth, scores.relation, scores.family, scores.health);
+        const severeHealth = scores.health <= 40;
+        const severeRisk = severeHealth || minDomain <= 40;
+        const midRisk = !severeRisk && (scores.health <= 48 || minDomain <= 48);
+        const average = (scores.career + scores.wealth + scores.relation + scores.family + scores.health) / 5;
+        let overall = average;
+        const notes = [];
+        if (severeRisk) {
+            overall = Math.min(overall, 50);
+            notes.push("短板效应触发：单项风险过低，综合分强制压制到风险区。");
+        } else if (midRisk) {
+            overall = Math.min(overall, 62);
+            notes.push("短板效应触发：存在明显偏科，综合分按保守档处理。");
+        }
+        scores.overall = overall;
+        return notes;
+    }
+
     function evaluateCycle(chart, pillarText, scope, meta, context = {}) {
         const dayGan = chart.pillars[2].stem;
         const stem = pillarText[0];
@@ -757,7 +848,8 @@
         });
         const specialAlerts = detectSpecialAlerts(chart, pillarText, context, gods, dynamicEco);
         applySpecialAlertScores(scores, specialAlerts);
-        scores.overall = (scores.career + scores.wealth + scores.relation + scores.family + scores.health) / 5;
+        const patternOverride = applyPatternRuleOverrides(chart, scores, { cycleElements, dynamicEco, gods });
+        const shortboardNotes = applyShortboardConstraint(scores);
         Object.keys(scores).forEach((key) => {
             scores[key] = clampScore(scores[key]);
         });
@@ -782,6 +874,7 @@
                 ...(diShiImpact.effect && ["长生", "冠带", "临官", "帝旺", "胎", "养"].includes(diShiImpact.diShi) ? [`十二长生落在${diShiImpact.diShi}：${diShiImpact.effect.note}`] : []),
                 ...(nayinInteraction.relation === "同气" || nayinInteraction.relation === "相生" ? [`纳音${nayinInteraction.relation}（${nayinInteraction.cycleNayin} ↔ ${nayinInteraction.dayNayin}），隐性助力更明显。`] : []),
                 ...palaceTriggers.filter((item) => item.relationType === "六合").map((item) => `${item.palace}被六合引动，属于可推进窗口。`),
+                ...patternOverride.positives,
                 ...specialAlerts.filter((item) => item.level === "chance").map((item) => item.text)
             ].slice(0, 7),
             risks: [
@@ -793,12 +886,15 @@
                 ...(diShiImpact.effect && ["病", "死", "墓", "绝", "衰"].includes(diShiImpact.diShi) ? [`十二长生落在${diShiImpact.diShi}：${diShiImpact.effect.note}`] : []),
                 ...(nayinInteraction.relation === "相克" ? [`纳音相克（${nayinInteraction.cycleNayin} ↔ ${nayinInteraction.dayNayin}），今年隐性阻力较强。`] : []),
                 ...palaceTriggers.filter((item) => item.relationType !== "六合").slice(0, 2).map((item) => `${item.palace}引动：${item.note}`),
+                ...patternOverride.negatives,
+                ...shortboardNotes,
                 ...specialAlerts.filter((item) => item.level !== "chance").map((item) => item.text)
             ].slice(0, 8),
             relationSignals,
             stemCombos,
             timing,
             dynamicEco,
+            patternOverride,
             specialAlerts,
             blunt: getBluntLine(scores)
         };
