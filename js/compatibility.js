@@ -34,6 +34,52 @@
         return Math.max(35, Math.min(95, Math.round(value)));
     }
 
+    function countGod(chart, gods) {
+        return chart.pillars.reduce((sum, pillar) => {
+            const all = [pillar.tenGod, ...pillar.tenGodZhi];
+            return sum + all.filter((god) => gods.includes(god)).length;
+        }, 0);
+    }
+
+    function buildBusinessInsights(primary, secondary, scores) {
+        const aLeader = countGod(primary, ["正官", "七杀"]);
+        const bLeader = countGod(secondary, ["正官", "七杀"]);
+        const aFinance = countGod(primary, ["正财", "偏财"]);
+        const bFinance = countGod(secondary, ["正财", "偏财"]);
+        const leader = aLeader === bLeader ? "双方都能主导，建议按项目轮值主责" : (aLeader > bLeader ? "主盘更适合做业务负责人" : "对象盘更适合做业务负责人");
+        const financeLead = aFinance === bFinance ? "双方财务敏感度接近，建议独立复核预算与合同" : (aFinance > bFinance ? "主盘更适合抓现金流与结算" : "对象盘更适合抓现金流与结算");
+        const aIsBWealth = primary.structure.maxElement === controlledElement(secondary.structure.dayElement);
+        const bIsAWealth = secondary.structure.maxElement === controlledElement(primary.structure.dayElement);
+        const wealthFlow = aIsBWealth && bIsAWealth
+            ? "两边都可能成为对方的财星资源，互带业务的潜力高。"
+            : aIsBWealth
+                ? "主盘更像对象盘的财星来源，适合主盘对外拓客、对象盘做落地。"
+                : bIsAWealth
+                    ? "对象盘更像主盘的财星来源，适合对象盘对外拿资源、主盘做经营转化。"
+                    : "彼此不属于典型“直接财星补位”，更要靠制度分工而不是默契。";
+        const friction = scores.communication <= 60 || scores.finance <= 60
+            ? "摩擦点会集中在报价、分成、责任边界和最终拍板权。"
+            : "协同基础尚可，但仍要用合同把权责和退出机制写清。";
+        return { leader, financeLead, wealthFlow, friction };
+    }
+
+    function buildChildEducationInsights(childChart) {
+        const kills = countGod(childChart, ["七杀"]);
+        const food = countGod(childChart, ["食神", "伤官"]);
+        const print = countGod(childChart, ["正印", "偏印"]);
+        const officer = countGod(childChart, ["正官"]);
+        if (kills >= 3 && officer <= 1) {
+            return "孩子盘七杀偏重，通常不吃硬压，建议“先立规则再给空间”，多用任务制和结果反馈，少用情绪压制。";
+        }
+        if (print >= 3 && food <= 1) {
+            return "印星偏重而食伤偏弱，孩子更容易想太多、表达偏慢。适合结构化学习和低噪环境，别用频繁比较制造焦虑。";
+        }
+        if (food >= 3) {
+            return "食伤较亮，孩子表达和创造驱动力更强。适合项目式学习、作品输出和舞台反馈，不适合死记硬背长期压着。";
+        }
+        return "盘面不走极端，教育策略以“稳定作息 + 清晰边界 + 正反馈”最有效。";
+    }
+
     function buildCompatibility(primary, secondary) {
         const aStem = primary.pillars[2].stem;
         const bStem = secondary.pillars[2].stem;
@@ -153,6 +199,37 @@
                 advice: "子嗣问题既看感情，也看身体、现实条件和长期责任，不要只凭一时热情决定。"
             }
         ];
+
+        const business = buildBusinessInsights(primary, secondary, scores);
+        sections.push({
+            title: "商业合伙视角",
+            verdict: scores.finance >= 70 && scores.communication >= 70 ? "有合伙基础，但要制度化运作。" : "能合作，但更依赖清晰分工和契约边界。",
+            plain: `白话：${business.wealthFlow} ${business.leader}，${business.financeLead}。`,
+            positives: [
+                "把“对外拓客、内部交付、财务结算”分开负责，效率通常更高。",
+                scores.finance >= 70 ? "财务协同分不低，具备做长期项目的基础。" : "先从小项目试合作，比一次性重仓更稳。"
+            ],
+            negatives: [
+                business.friction,
+                "没有退出机制的合伙，往往在关系还没坏时就埋雷。"
+            ],
+            advice: "合伙先写清分工、分成、拍板权和退出条款，再谈感情与信任。"
+        });
+
+        sections.push({
+            title: "亲子教育视角（对象盘）",
+            verdict: "把对象盘当“孩子盘”看，可快速得到可执行的养育策略。",
+            plain: `白话：${buildChildEducationInsights(secondary)}`,
+            positives: [
+                "先看孩子的驱动力类型，再定管教方式，比一味压服更有效。",
+                "教育策略和命盘倾向对齐后，亲子冲突会显著下降。"
+            ],
+            negatives: [
+                "把“克父母”当结论会制造焦虑，不利于真实养育。",
+                "忽视作息、环境和沟通方式，再好的天赋也会被消耗。"
+            ],
+            advice: "教育上先做可执行的日常系统：作息、任务、反馈、边界。"
+        });
 
         return { scores, sections, summary };
     }

@@ -52,6 +52,8 @@
             tags: Array.isArray(entry.tags) ? entry.tags.filter(Boolean) : [],
             content: String(entry.content || ""),
             source: String(entry.source || "手动添加"),
+            locator: String(entry.locator || ""),
+            kind: String(entry.kind || "note"),
             embedding: Array.isArray(entry.embedding) ? entry.embedding : null,
             embeddingModel: String(entry.embeddingModel || "")
         };
@@ -232,17 +234,30 @@
         return String(name || "").replace(/\.[^.]+$/, "");
     }
 
-    function buildEntriesFromText(fileName, text) {
-        return splitSemanticChunks(text).map((chunk, index) => ({
+    function detectEntryKind(fileName, chunk = null) {
+        const text = `${fileName} ${chunk?.title || ""} ${chunk?.content || ""}`.toLowerCase();
+        if (text.includes("案例") || text.includes("case")) return "case";
+        if (text.includes("滴天髓") || text.includes("渊海") || text.includes("子平") || text.includes("通会") || text.includes("宝鉴")) return "book";
+        return "note";
+    }
+
+    function buildEntriesFromChunks(fileName, chunks) {
+        return (chunks || []).map((chunk, index) => ({
             id: `import-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${index}`,
             title: `${filenameWithoutExt(fileName)} · ${chunk.title || `片段${index + 1}`}`,
             tags: extractChunkTags(chunk.content),
             content: chunk.content,
-            source: fileName
+            source: fileName,
+            locator: chunk.locator || chunk.title || `片段${index + 1}`,
+            kind: detectEntryKind(fileName, chunk)
         }));
     }
 
-    async function parsePdfToText(file) {
+    function buildEntriesFromText(fileName, text) {
+        return buildEntriesFromChunks(fileName, splitSemanticChunks(text));
+    }
+
+    async function parsePdfToChunks(file) {
         try {
             const pdfjs = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs");
             const bytes = new Uint8Array(await file.arrayBuffer());
@@ -252,16 +267,25 @@
             for (let i = 1; i <= doc.numPages; i++) {
                 const page = await doc.getPage(i);
                 const content = await page.getTextContent();
-                const line = content.items.map((item) => item.str).join(" ");
-                pages.push(line);
+                const line = normalizeText(content.items.map((item) => item.str).join(" "));
+                if (!line) continue;
+                pages.push({
+                    title: `第${i}页`,
+                    locator: `p.${i}`,
+                    content: line
+                });
             }
-            return normalizeText(pages.join("\n\n"));
+            return pages.flatMap((page) => splitSemanticChunks(page.content).map((chunk, index) => ({
+                title: `${page.title}${index ? ` · 段${index + 1}` : ""}`,
+                locator: page.locator,
+                content: chunk.content
+            })));
         } catch (error) {
             throw new Error(`PDF 解析失败（${file.name}）：${error.message}`);
         }
     }
 
-    async function parseEpubToText(file) {
+    async function parseEpubToChunks(file) {
         try {
             const jszipModule = await import("https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm");
             const JSZip = jszipModule.default || jszipModule;
@@ -273,9 +297,17 @@
             for (const name of htmlNames) {
                 const html = await zip.file(name).async("string");
                 const text = stripHtml(html);
-                if (text.trim()) sections.push(text);
+                const normalized = normalizeText(text);
+                if (!normalized) continue;
+                splitSemanticChunks(normalized).forEach((chunk, index) => {
+                    sections.push({
+                        title: `${name}${index ? ` · 段${index + 1}` : ""}`,
+                        locator: name,
+                        content: chunk.content
+                    });
+                });
             }
-            return normalizeText(sections.join("\n\n"));
+            return sections;
         } catch (error) {
             throw new Error(`EPUB 解析失败（${file.name}）：${error.message}`);
         }
@@ -290,6 +322,8 @@
             tags: item.tags || extractChunkTags(item.content || JSON.stringify(item)),
             content: item.content || JSON.stringify(item),
             source: item.source || fileName,
+            locator: item.locator || "",
+            kind: item.kind || detectEntryKind(fileName, item),
             embedding: item.embedding || null,
             embeddingModel: item.embeddingModel || ""
         }));
@@ -311,12 +345,12 @@
             return parseJsonEntries(file.name, text);
         }
         if (lower.endsWith(".pdf")) {
-            const text = await parsePdfToText(file);
-            return buildEntriesFromText(file.name, text);
+            const chunks = await parsePdfToChunks(file);
+            return buildEntriesFromChunks(file.name, chunks);
         }
         if (lower.endsWith(".epub")) {
-            const text = await parseEpubToText(file);
-            return buildEntriesFromText(file.name, text);
+            const chunks = await parseEpubToChunks(file);
+            return buildEntriesFromChunks(file.name, chunks);
         }
         const text = await readFileAsText(file);
         return buildEntriesFromText(file.name, text);
@@ -378,6 +412,20 @@
             .slice(0, 8);
     }
 
+    function buildCitation(entry, index = 1) {
+        const locator = entry.locator ? ` · ${entry.locator}` : "";
+        return `[${index}] ${entry.title}（${entry.source}${locator}）`;
+    }
+
+    function buildCitedReferences(entries, limit = 6) {
+        return (entries || []).slice(0, limit).map((entry, index) => ({
+            ...entry,
+            citationId: index + 1,
+            citation: buildCitation(entry, index + 1),
+            excerpt: String(entry.content || "").slice(0, 220)
+        }));
+    }
+
     function semanticMatchEntries(queryEmbedding, limit = 8) {
         return loadEntries()
             .filter((entry) => Array.isArray(entry.embedding) && entry.embedding.length)
@@ -386,6 +434,26 @@
                 score: cosineSimilarity(entry.embedding, queryEmbedding)
             }))
             .filter((entry) => entry.score > 0.15)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, limit);
+    }
+
+    function matchCaseEntries(chart, currentYearEval, currentMonthEval, compatibility, queryEmbedding = null, limit = 5) {
+        const keywords = getKeywords(chart, currentYearEval, currentMonthEval, compatibility).map((item) => String(item).toLowerCase());
+        return loadEntries()
+            .filter((entry) => entry.kind === "case" || /案例|case/i.test(`${entry.title} ${entry.tags.join(" ")}`))
+            .map((entry) => {
+                const haystack = `${entry.title} ${entry.tags.join(" ")} ${entry.content}`.toLowerCase();
+                const keywordScore = keywords.reduce((sum, keyword) => sum + (haystack.includes(keyword) ? 1 : 0), 0);
+                const semanticScore = queryEmbedding && Array.isArray(entry.embedding) ? cosineSimilarity(entry.embedding, queryEmbedding) * 10 : 0;
+                const score = keywordScore + semanticScore;
+                return {
+                    ...entry,
+                    score,
+                    similarity: Math.max(0, Math.min(99, Math.round((score / Math.max(keywords.length || 1, 1)) * 100)))
+                };
+            })
+            .filter((entry) => entry.score > 0)
             .sort((a, b) => b.score - a.score)
             .slice(0, limit);
     }
@@ -405,7 +473,10 @@
         splitSemanticChunks,
         extractChunkTags,
         buildQueryText,
+        buildCitation,
+        buildCitedReferences,
         matchEntries,
+        matchCaseEntries,
         semanticMatchEntries
     };
 })();

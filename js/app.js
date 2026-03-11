@@ -1,6 +1,8 @@
 (function () {
     const STORAGE_KEY = "tming-bazi-profiles-v4";
     const AI_CONFIG_KEY = "tming-ai-config-v1";
+    const GEO_CONFIG_KEY = "tming-geo-config-v1";
+    const LUNAR_MONTH_NAMES = ["正月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "冬月", "腊月"];
     const REGIONS = [
         { name: "上海", longitude: 121.47, timezoneOffset: 8 },
         { name: "北京", longitude: 116.41, timezoneOffset: 8 },
@@ -95,6 +97,14 @@
         };
     }
 
+    function defaultGeoConfig() {
+        return {
+            provider: "none",
+            apiKey: "",
+            query: ""
+        };
+    }
+
     function loadAiConfig() {
         try {
             return { ...defaultAiConfig(), ...(JSON.parse(localStorage.getItem(AI_CONFIG_KEY) || "null") || {}) };
@@ -107,6 +117,20 @@
         state.ai = { ...defaultAiConfig(), ...config };
         localStorage.setItem(AI_CONFIG_KEY, JSON.stringify(state.ai));
         return state.ai;
+    }
+
+    function loadGeoConfig() {
+        try {
+            return { ...defaultGeoConfig(), ...(JSON.parse(localStorage.getItem(GEO_CONFIG_KEY) || "null") || {}) };
+        } catch {
+            return defaultGeoConfig();
+        }
+    }
+
+    function saveGeoConfig(config) {
+        const merged = { ...defaultGeoConfig(), ...config };
+        localStorage.setItem(GEO_CONFIG_KEY, JSON.stringify(merged));
+        return merged;
     }
 
     function pad(value) {
@@ -149,29 +173,40 @@
         }).join("");
     }
 
-    function parseMonthOptionValue(rawValue, config) {
-        const value = String(rawValue || $(config.month).value || "1");
+    function lunarMonthLabel(month) {
+        return LUNAR_MONTH_NAMES[Math.max(1, Math.min(12, Number(month || 1))) - 1] || `${month}月`;
+    }
+
+    function parseMonthOptionValue(rawValue) {
+        const value = String(rawValue || "1");
+        const lunarLeap = /L$/i.test(value);
+        const numeric = Number(value.replace(/L$/i, ""));
         return {
-            month: Number(value),
-            lunarLeap: $(config.calendarType).value === "lunar" && $(config.lunarLeap).value === "1"
+            month: Number.isFinite(numeric) && numeric > 0 ? numeric : 1,
+            lunarLeap
         };
     }
 
     function getMonthSelection(config) {
-        const selection = parseMonthOptionValue($(config.month).value, config);
+        const selection = parseMonthOptionValue($(config.month).value);
         return {
             month: Number.isFinite(selection.month) && selection.month > 0 ? selection.month : 1,
-            lunarLeap: Boolean(selection.lunarLeap)
+            lunarLeap: $(config.calendarType).value === "lunar" ? Boolean(selection.lunarLeap) : false
         };
     }
 
     function setMonthSelection(config, month, lunarLeap) {
         const monthEl = $(config.month);
-        const selected = Array.from(monthEl.options).some((option) => option.value === String(month)) ? String(month) : (monthEl.options[0]?.value || "1");
+        const calendarType = $(config.calendarType).value;
+        const preferred = calendarType === "lunar" && lunarLeap ? `${month}L` : String(month);
+        const fallback = String(month);
+        const selected = Array.from(monthEl.options).some((option) => option.value === preferred)
+            ? preferred
+            : Array.from(monthEl.options).some((option) => option.value === fallback)
+                ? fallback
+                : (monthEl.options[0]?.value || "1");
         monthEl.value = selected;
-        if ($(config.calendarType).value === "lunar") {
-            $(config.lunarLeap).value = lunarLeap ? "1" : "0";
-        }
+        $(config.lunarLeap).value = /L$/i.test(selected) ? "1" : "0";
     }
 
     function getRegionGroupNote(region) {
@@ -185,21 +220,80 @@
         return `${region.name}相对时区中央经线的时间偏差约 ${offset} 分钟，通常不跨时辰，标准时间多数情况下可用。`;
     }
 
-    function renderMonthOptions(config) {
+    function renderMonthOptions(config, preferred = null) {
         const monthEl = $(config.month);
         const calendarType = $(config.calendarType).value;
         const year = Number($(config.year).value);
-        const previous = getMonthSelection(config);
+        const previous = preferred || getMonthSelection(config);
         const leapMonth = LunarYear.fromYear(year).getLeapMonth();
         monthEl.innerHTML = "";
         for (let month = 1; month <= 12; month++) {
             const option = document.createElement("option");
             option.value = String(month);
-            option.textContent = calendarType === "lunar" && leapMonth === month ? `${month}月（该年有闰${month}月）` : String(month);
-            if (month === previous.month) option.selected = true;
+            option.textContent = calendarType === "lunar" ? lunarMonthLabel(month) : String(month);
+            if (month === previous.month && !previous.lunarLeap) option.selected = true;
             monthEl.appendChild(option);
+            if (calendarType === "lunar" && leapMonth === month) {
+                const leapOption = document.createElement("option");
+                leapOption.value = `${month}L`;
+                leapOption.textContent = `闰${lunarMonthLabel(month)}`;
+                if (month === previous.month && previous.lunarLeap) leapOption.selected = true;
+                monthEl.appendChild(leapOption);
+            }
         }
         setMonthSelection(config, previous.month, previous.lunarLeap);
+    }
+
+    function updateCalendarFromSolar(config, solar, nextCalendarType) {
+        $(config.calendarType).value = nextCalendarType;
+        if (nextCalendarType === "solar") {
+            $(config.year).value = String(solar.getYear());
+            renderMonthOptions(config, { month: solar.getMonth(), lunarLeap: false });
+            syncDayOptions(config);
+            $(config.day).value = String(Math.min(solar.getDay(), Number($(config.day).options.length || 31)));
+            $(config.time).value = `${pad(solar.getHour())}:${pad(solar.getMinute())}`;
+        } else {
+            const lunar = solar.getLunar();
+            const lunarMonth = lunar.getMonth();
+            $(config.year).value = String(lunar.getYear());
+            renderMonthOptions(config, { month: Math.abs(lunarMonth), lunarLeap: lunarMonth < 0 });
+            syncDayOptions(config);
+            $(config.day).value = String(Math.min(lunar.getDay(), Number($(config.day).options.length || 30)));
+            $(config.time).value = `${pad(solar.getHour())}:${pad(solar.getMinute())}`;
+        }
+        syncLunarLeap(config);
+    }
+
+    function switchCalendarKeepingMoment(config, previousType, nextType) {
+        const hourMinute = getTimeParts(config);
+        const selection = getMonthSelection(config);
+        const rawInput = {
+            profileName: $(config.name).value.trim() || (config === PROFILE_CONFIGS.primary ? "未命名档案" : "合盘对象"),
+            calendarType: previousType,
+            year: Number($(config.year).value),
+            month: selection.month,
+            day: Number($(config.day).value),
+            lunarLeap: selection.lunarLeap,
+            hour: hourMinute.hour,
+            minute: hourMinute.minute,
+            gender: $(config.gender).value,
+            solarTimeMode: $(config.solarTimeMode).value,
+            timezoneOffset: Number($(config.timezoneOffset).value),
+            longitude: Number($(config.longitude).value),
+            regionName: (REGIONS[Number($(config.region).value)] || REGIONS[0]).name,
+            dayBoundarySect: Number($(config.dayBoundarySect).value),
+            targetYear: config.targetYear ? Number($(config.targetYear).value) : Number($(PROFILE_CONFIGS.primary.targetYear).value),
+            yunSect: config.yunSect ? Number($(config.yunSect).value) : 2
+        };
+        try {
+            const solar = BaziCore.getSolarFromInput(rawInput);
+            updateCalendarFromSolar(config, solar, nextType);
+        } catch {
+            // 如果当前输入本身就非法（极少），只切模式不做转换，避免锁死表单。
+            syncLunarLeap(config);
+            renderMonthOptions(config);
+            syncDayOptions(config);
+        }
     }
 
     function initProfileControls(config, defaultYear, defaultMonth, defaultDay, defaultRegion) {
@@ -213,6 +307,7 @@
         renderMonthOptions(config);
         syncLunarLeap(config);
         syncDayOptions(config);
+        $(config.calendarType).dataset.prevType = $(config.calendarType).value;
         if (config.enabled) setCompatibilityEnabled(false);
     }
 
@@ -221,6 +316,7 @@
         initProfileControls(PROFILE_CONFIGS.compat, new Date().getFullYear() - 28, 10, 9, 0);
         fillSelect(PROFILE_CONFIGS.primary.targetYear, 1900, 2099, new Date().getFullYear());
         renderAiConfig(loadAiConfig());
+        renderGeoConfig(loadGeoConfig());
     }
 
     function renderAiConfig(config) {
@@ -257,6 +353,24 @@
         $("llm-status").innerHTML = `<p>${message}</p>`;
     }
 
+    function renderGeoConfig(config) {
+        $("geo-provider").value = config.provider || "none";
+        $("geo-api-key").value = config.apiKey || "";
+        $("geo-query").value = config.query || "";
+    }
+
+    function getGeoConfigFromForm() {
+        return {
+            provider: $("geo-provider").value,
+            apiKey: $("geo-api-key").value.trim(),
+            query: $("geo-query").value.trim()
+        };
+    }
+
+    function persistGeoConfigFromForm() {
+        saveGeoConfig(getGeoConfigFromForm());
+    }
+
     function bindEvents() {
         document.querySelectorAll(".nav-links a").forEach((link) => {
             link.addEventListener("click", (event) => {
@@ -281,9 +395,14 @@
         $("btn-kb-seed").addEventListener("click", resetKnowledgeBase);
         $("btn-kb-add").addEventListener("click", addKnowledgeBaseEntry);
         $("kb-file-input").addEventListener("change", importKnowledgeBaseFiles);
+        $("btn-geo-search").addEventListener("click", geocodeBirthPlace);
         ["llm-provider", "llm-workflow-mode", "llm-base-url", "llm-api-key", "llm-model", "embedding-model", "llm-prompt-template"].forEach((id) => {
             $(id).addEventListener("change", persistAiConfigFromForm);
             $(id).addEventListener("input", persistAiConfigFromForm);
+        });
+        ["geo-provider", "geo-api-key", "geo-query"].forEach((id) => {
+            $(id).addEventListener("change", persistGeoConfigFromForm);
+            $(id).addEventListener("input", persistGeoConfigFromForm);
         });
         bindProfileEvents(PROFILE_CONFIGS.primary);
         bindProfileEvents(PROFILE_CONFIGS.compat);
@@ -298,15 +417,27 @@
             applyRegion(config, REGIONS[Number(event.target.value)] || REGIONS[0]);
             updatePreview(config);
         });
-        [config.calendarType, config.year, config.month].forEach((id) => {
-            $(id).addEventListener("change", () => {
+        $(config.calendarType).addEventListener("change", () => {
+            const previousType = $(config.calendarType).dataset.prevType || "solar";
+            const nextType = $(config.calendarType).value;
+            if (previousType !== nextType) {
+                switchCalendarKeepingMoment(config, previousType, nextType);
+            } else {
                 renderMonthOptions(config);
                 syncLunarLeap(config);
                 syncDayOptions(config);
-                updatePreview(config);
-            });
+            }
+            $(config.calendarType).dataset.prevType = nextType;
+            updatePreview(config);
         });
-        $(config.lunarLeap).addEventListener("change", () => {
+        $(config.year).addEventListener("change", () => {
+            renderMonthOptions(config);
+            syncLunarLeap(config);
+            syncDayOptions(config);
+            updatePreview(config);
+        });
+        $(config.month).addEventListener("change", () => {
+            syncLunarLeap(config);
             syncDayOptions(config);
             updatePreview(config);
         });
@@ -368,16 +499,89 @@
         $(config.timezoneOffset).value = String(region.timezoneOffset);
     }
 
-    function syncLunarLeap(config) {
-        const leapEl = $(config.lunarLeap);
-        const calendarType = $(config.calendarType).value;
-        if (calendarType !== "lunar") {
-            leapEl.value = "0";
-            leapEl.disabled = true;
+    async function geocodeByAmap(query, apiKey) {
+        const url = `https://restapi.amap.com/v3/geocode/geo?address=${encodeURIComponent(query)}&key=${encodeURIComponent(apiKey)}`;
+        const response = await fetch(url);
+        const payload = await response.json();
+        if (String(payload.status) !== "1" || !Array.isArray(payload.geocodes) || !payload.geocodes.length) {
+            throw new Error(payload.info || "高德未返回有效坐标。");
+        }
+        const best = payload.geocodes[0];
+        const [lngText, latText] = String(best.location || "").split(",");
+        const longitude = Number(lngText);
+        const latitude = Number(latText);
+        if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
+            throw new Error("高德返回坐标格式异常。");
+        }
+        return {
+            provider: "高德",
+            longitude,
+            latitude,
+            title: best.formatted_address || query,
+            detail: [best.country, best.province, best.city, best.district].filter(Boolean).join(" ")
+        };
+    }
+
+    async function geocodeByTencent(query, apiKey) {
+        const url = `https://apis.map.qq.com/ws/geocoder/v1/?address=${encodeURIComponent(query)}&key=${encodeURIComponent(apiKey)}`;
+        const response = await fetch(url);
+        const payload = await response.json();
+        if (Number(payload.status) !== 0 || !payload.result?.location) {
+            throw new Error(payload.message || "腾讯未返回有效坐标。");
+        }
+        const longitude = Number(payload.result.location.lng);
+        const latitude = Number(payload.result.location.lat);
+        if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
+            throw new Error("腾讯返回坐标格式异常。");
+        }
+        return {
+            provider: "腾讯",
+            longitude,
+            latitude,
+            title: payload.result.title || query,
+            detail: payload.result.address || ""
+        };
+    }
+
+    async function geocodeBirthPlace() {
+        const config = getGeoConfigFromForm();
+        persistGeoConfigFromForm();
+        if (config.provider === "none") {
+            $("geo-status").innerHTML = "未启用地图接口。你可以直接手填经度，或选择高德/腾讯后再检索。";
             return;
         }
-        // 农历模式下把闰月开关始终交给用户手动控制，是否合法在预览和提交时校验。
-        leapEl.disabled = false;
+        if (!config.apiKey) {
+            $("geo-status").innerHTML = `<span class="bad-text">请先填写地图 API Key。</span>`;
+            return;
+        }
+        if (!config.query) {
+            $("geo-status").innerHTML = `<span class="bad-text">请先输入出生医院或县市地址。</span>`;
+            return;
+        }
+        try {
+            $("geo-status").innerHTML = "正在检索地址并换算经纬度...";
+            const result = config.provider === "amap"
+                ? await geocodeByAmap(config.query, config.apiKey)
+                : await geocodeByTencent(config.query, config.apiKey);
+            const customIndex = REGIONS.findIndex((item) => item.name === "自定义");
+            const primary = PROFILE_CONFIGS.primary;
+            $(primary.region).value = String(Math.max(customIndex, 0));
+            $(primary.longitude).value = result.longitude.toFixed(4);
+            $("geo-status").innerHTML = [
+                `<div class="preview-line"><span>定位接口</span><strong>${result.provider}</strong></div>`,
+                `<div class="preview-line"><span>解析结果</span><strong>${escapeHtml(result.title)}</strong></div>`,
+                `<div class="preview-line"><span>坐标</span><strong>经度 ${result.longitude.toFixed(4)} / 纬度 ${result.latitude.toFixed(4)}</strong></div>`,
+                `<div class="preview-line"><span>说明</span><strong>${escapeHtml(result.detail || "已写入经度，真太阳时将按此经度重算。")}</strong></div>`
+            ].join("");
+            updatePreview(primary);
+        } catch (error) {
+            $("geo-status").innerHTML = `<span class="bad-text">定位失败：${escapeHtml(error.message)}。若目标服务禁止浏览器跨域，请改为手填经度或自建本地代理。</span>`;
+        }
+    }
+
+    function syncLunarLeap(config) {
+        const selection = getMonthSelection(config);
+        $(config.lunarLeap).value = selection.lunarLeap ? "1" : "0";
     }
 
     function syncDayOptions(config) {
@@ -410,10 +614,13 @@
     }
 
     function validateLunarLeapChoice(input) {
-        if (input.calendarType !== "lunar" || !input.lunarLeap) {
+        if (input.calendarType !== "lunar") {
             return { valid: true, leapMonth: LunarYear.fromYear(input.year).getLeapMonth() };
         }
         const leapMonth = LunarYear.fromYear(input.year).getLeapMonth();
+        if (!input.lunarLeap) {
+            return { valid: true, leapMonth };
+        }
         if (!leapMonth) {
             return { valid: false, leapMonth, message: `你选择了闰月，但 ${input.year} 年没有闰月。` };
         }
@@ -474,10 +681,8 @@
             const leapMonth = leapValidation.leapMonth;
             const leapHint = input.calendarType === "lunar"
                 ? (leapMonth
-                    ? (leapMonth === input.month
-                        ? `系统已识别该年闰${leapMonth}月。你可手动选择“闰月是/否”，系统只按你的选择换算。`
-                        : `系统已识别该年闰${leapMonth}月。你当前选的是${input.month}月，若选“闰月是”会判定为无效录入。`)
-                    : `系统已识别该年无闰月。若你手动选“闰月是”，系统会提示无效。`)
+                    ? `系统已识别该年闰${lunarMonthLabel(leapMonth)}。月份下拉已直接提供“闰${lunarMonthLabel(leapMonth)}”选项。`
+                    : "系统已识别该年无闰月，月份下拉不显示闰月项。")
                 : (preview.standardLunar.getMonth() < 0
                     ? `当前为公历录入，不要求填写闰月。换算农历结果为“闰${Math.abs(preview.standardLunar.getMonth())}月”。`
                     : "当前为公历录入，不涉及闰月录入判断。");
@@ -486,7 +691,7 @@
                 : "本次排盘仍采用标准时间。真太阳时只有在修正后影响时辰或日期边界时，自动模式才会接管。";
             const inputTypeText = input.calendarType === "solar"
                 ? `公历录入：${preview.standardSolar.toYmdHms().slice(0, 16)}`
-                : `农历录入：${input.year}年${input.lunarLeap ? "闰" : ""}${input.month}月${input.day}日 ${pad(input.hour)}:${pad(input.minute)}`;
+                : `农历录入：${input.year}年${input.lunarLeap ? "闰" : ""}${lunarMonthLabel(input.month)}${input.day}日 ${pad(input.hour)}:${pad(input.minute)}`;
             $(config.preview).innerHTML = `
                 <div class="preview-line"><span>录入值</span><strong>${inputTypeText}</strong></div>
                 <div class="preview-line"><span>标准公历</span><strong>${preview.standardSolar.toYmdHms().slice(0, 16)}</strong></div>
@@ -583,6 +788,7 @@
         const master = BaziAnalysis.buildMasterSummary(chart, currentYearEval, currentMonthEval);
         const criticalYears = BaziAnalysis.buildCriticalYears(chart, allYearEvaluations);
         const eventDashboard = BaziAnalysis.buildEventDashboard(chart, allYearEvaluations, monthEvaluations);
+        const dailyGuide = BaziAnalysis.buildDailyGuide(chart, dayun.current.label, new Date(), 30);
         const report = AIEngine.buildReport(chart, dayun, currentYearEval, currentMonthEval, health, primaryInput.targetYear);
         const lucky = AIEngine.buildLuckySuggestions(chart, currentYearEval, currentMonthEval, health);
         let compatibility = null;
@@ -597,6 +803,7 @@
         }
         const modern = BaziAnalysis.buildModernLifeAdvice(chart, compatibility?.result || null, primaryInput.targetYear);
         const kbMatches = KnowledgeBaseEngine.matchEntries(chart, currentYearEval, currentMonthEval, compatibility);
+        const caseMatches = KnowledgeBaseEngine.matchCaseEntries(chart, currentYearEval, currentMonthEval, compatibility, null, 5);
         state.current = {
             input: primaryInput,
             chart,
@@ -614,9 +821,12 @@
             modern,
             criticalYears,
             eventDashboard,
+            dailyGuide,
             compatibility,
             kbMatches,
+            caseMatches,
             ragMatches: [],
+            ragReferences: [],
             llmReport: "",
             agentReports: {},
             report,
@@ -627,7 +837,7 @@
     }
 
     function renderAll() {
-        const { input, chart, dayun, yearEvaluations, monthEvaluations, allYearEvaluations, eventDashboard, criticalYears, currentYearEval, currentMonthEval, health, environment, detailed, family, master, modern, compatibility, kbMatches, report, lucky } = state.current;
+        const { input, chart, dayun, yearEvaluations, monthEvaluations, allYearEvaluations, eventDashboard, criticalYears, dailyGuide, currentYearEval, currentMonthEval, health, environment, detailed, family, master, modern, compatibility, kbMatches, caseMatches, report, lucky } = state.current;
         $(PROFILE_CONFIGS.primary.targetYear).value = String(input.targetYear);
         $("env-year-label").textContent = input.targetYear;
         $("liuyue-year-label").textContent = input.targetYear;
@@ -639,9 +849,9 @@
         renderNarratives(chart);
         renderUsefulAnalysis(chart);
         renderShenshaDetails(chart);
-        renderDayun(dayun, yearEvaluations, monthEvaluations, allYearEvaluations, eventDashboard, criticalYears);
+        renderDayun(dayun, yearEvaluations, monthEvaluations, allYearEvaluations, eventDashboard, criticalYears, dailyGuide);
         renderHealth(health, yearEvaluations, monthEvaluations);
-        renderAI(report, environment, lucky, modern, detailed, family, master, currentYearEval, currentMonthEval, compatibility, kbMatches);
+        renderAI(report, environment, lucky, modern, detailed, family, master, currentYearEval, currentMonthEval, compatibility, kbMatches, caseMatches);
     }
 
     function renderCalculationMeta(chart, dayun) {
@@ -651,6 +861,7 @@
             longitude: chart.input.longitude,
             timezoneOffset: chart.input.timezoneOffset
         };
+        const dayBoundaryText = BaziCore.getDayBoundaryModeText(chart.input.dayBoundarySect);
         const commanderText = chart.structure.commanderInfo.weights.map((item) => `${item.stem}${item.element} ${Math.round(item.weight * 100)}%`).join("、");
         const transformText = [
             ...chart.transformations.stemCombos.filter((item) => item.success).map((item) => `${item.pair}->${item.element}`),
@@ -665,14 +876,28 @@
             { title: "地区分组", body: `${getRegionGroup(region)} · ${getRegionGroupNote(region)}` },
             { title: "标准排盘时间", body: `${solar.standardText} · ${solar.standardShichen.label}` },
             { title: "真太阳时", body: `${solar.trueSolarText} · ${solar.trueSolarShichen.label} · 修正 ${BaziCore.formatSigned(solar.totalOffsetMinutes)} 分钟` },
-            { title: "最终依据", body: `${solar.usedMode === "trueSolar" ? "采用真太阳时" : "采用标准时间"} · 晚子时流派 ${chart.input.dayBoundarySect === 1 ? "子初换日" : "子正换日"}` },
+            { title: "最终依据", body: `${solar.usedMode === "trueSolar" ? "采用真太阳时" : "采用标准时间"} · 换日流派 ${dayBoundaryText}` },
             { title: "月令与节气", body: `${chart.seasonal.season}令 · ${chart.seasonal.jieQi.prevName}后 ${chart.seasonal.jieQi.passedDays} 天 / ${chart.seasonal.jieQi.nextName}前 ${chart.seasonal.jieQi.remainingDays} 天 · 司令 ${commanderText}` },
             { title: "格局与根气", body: `${chart.structure.pattern.finalPattern} · 日主${chart.structure.strength}（强弱比 ${chart.structure.strengthScore}） · 日主根气 ${chart.roots.dayMasterRootStrength}` },
             { title: "合化与改气", body: transformText },
             { title: "盲派断点", body: blindText },
             { title: "起运设置", body: `起运流派 ${chart.input.yunSect === 2 ? "分钟折算" : "时辰折算"} · 起运日期约 ${dayun.startSolar}` }
         ];
-        $("calculation-meta").innerHTML = cards.map((item) => `<div class="mini-card"><h3>${item.title}</h3><p>${item.body}</p></div>`).join("");
+        if (chart.boundaryMeta?.note) {
+            cards.push({ title: "换日补充", body: chart.boundaryMeta.note });
+        }
+        if (chart.seasonal.jieQi?.criticalBoundary) {
+            cards.push({
+                title: "交节边界预警",
+                body: `经当前排盘时刻校准，${chart.seasonal.jieQi.criticalText} 上一节气时间 ${chart.seasonal.jieQi.prevDateText}，下一节气时间 ${chart.seasonal.jieQi.nextDateText}。若你出生记录在边界附近，建议核对医院原始时间。`
+            });
+        }
+        $("calculation-meta").innerHTML = cards.map((item) => `
+            <div class="mini-card ${item.title === "交节边界预警" ? "warning-card" : ""}">
+                <h3>${item.title}</h3>
+                <p>${item.body}</p>
+            </div>
+        `).join("");
     }
 
     function renderPillars(chart) {
@@ -798,7 +1023,7 @@
         $("shensha-analysis").innerHTML = BaziAnalysis.buildShenshaDetails(chart).map(renderSectionCard).join("");
     }
 
-    function renderDayun(dayun, yearEvaluations, monthEvaluations, allYearEvaluations, eventDashboard, criticalYears) {
+    function renderDayun(dayun, yearEvaluations, monthEvaluations, allYearEvaluations, eventDashboard, criticalYears, dailyGuide) {
         $("dayun-info").innerHTML = `<p>起运约 ${dayun.startYear} 年 ${dayun.startMonth} 个月 ${dayun.startDay} 天 ${dayun.startHour} 小时后启动，当前处于 <strong>${dayun.current.label}</strong> 大运。</p>`;
         $("dayun-timeline").innerHTML = dayun.list.map((item) => `
             <div class="timeline-item ${item.label === dayun.current.label ? "active" : ""}">
@@ -815,6 +1040,7 @@
                 <p class="blunt">${item.evaluation.blunt}</p>
                 <p class="good-text">可能发生：${item.evaluation.opportunities[0]}</p>
                 <p class="bad-text">需要注意：${item.evaluation.risks[0]}</p>
+                ${(item.evaluation.specialAlerts || []).length ? `<p class="bad-text">雷达预警：${item.evaluation.specialAlerts.map((entry) => entry.type).join("、")}</p>` : ""}
             </div>
         `).join("")}</div>`;
         $("liuyue-container").innerHTML = `<div class="pair-grid">${monthEvaluations.map((item) => `
@@ -824,13 +1050,27 @@
                 <p class="blunt">${item.evaluation.blunt}</p>
                 <p class="good-text">可能发生：${item.evaluation.opportunities[0]}</p>
                 <p class="bad-text">需要注意：${item.evaluation.risks[0]}</p>
+                ${(item.evaluation.specialAlerts || []).length ? `<p class="bad-text">雷达预警：${item.evaluation.specialAlerts.map((entry) => entry.type).join("、")}</p>` : ""}
             </div>
         `).join("")}</div>`;
         ChartRenderer.drawLineChart($("fortune-chart"), yearEvaluations.map((item) => ({ label: item.year, value: item.evaluation.scores.overall })), "#9a3412");
         renderLifeRoadmap(allYearEvaluations, criticalYears);
         renderEventDashboard(eventDashboard);
+        renderDailyGuide(dailyGuide);
         renderDomainCharts(yearEvaluations, monthEvaluations);
         renderFocusNarratives(yearEvaluations, monthEvaluations);
+    }
+
+    function renderDailyGuide(dailyGuide) {
+        const container = $("daily-guide");
+        if (!container) return;
+        container.innerHTML = (dailyGuide || []).map((item) => `
+            <div class="mini-card ${item.level === "慎" ? "warning-card" : ""}">
+                <h3>${item.date} · ${item.pillar}</h3>
+                <p class="${item.level === "宜" ? "good-text" : item.level === "慎" ? "bad-text" : ""}">${item.level} · 评分 ${item.score}</p>
+                <p>${item.note}</p>
+            </div>
+        `).join("") || `<div class="mini-card"><p>暂无流日数据。</p></div>`;
     }
 
     function renderLifeRoadmap(allYearEvaluations, criticalYears) {
@@ -852,10 +1092,15 @@
         const wealthTop = [...(allYearEvaluations || [])].sort((a, b) => b.evaluation.scores.wealth - a.evaluation.scores.wealth).slice(0, 3);
         const relationTop = [...(allYearEvaluations || [])].sort((a, b) => b.evaluation.scores.relation - a.evaluation.scores.relation).slice(0, 3);
         const healthRisk = [...(allYearEvaluations || [])].sort((a, b) => a.evaluation.scores.health - b.evaluation.scores.health).slice(0, 3);
+        const warningTop = [...(allYearEvaluations || [])]
+            .filter((item) => (item.evaluation.specialAlerts || []).some((entry) => entry.level !== "chance"))
+            .sort((a, b) => (b.evaluation.specialAlerts || []).length - (a.evaluation.specialAlerts || []).length)
+            .slice(0, 5);
         const markers = [
             ...wealthTop.map((item) => ({ index: item.year - birthYear, type: "wealth", symbol: "财" })),
             ...relationTop.map((item) => ({ index: item.year - birthYear, type: "relation", symbol: "缘" })),
-            ...healthRisk.map((item) => ({ index: item.year - birthYear, type: "health", symbol: "警" }))
+            ...healthRisk.map((item) => ({ index: item.year - birthYear, type: "health", symbol: "警" })),
+            ...warningTop.map((item) => ({ index: item.year - birthYear, type: "warning", symbol: "危" }))
         ];
         ChartRenderer.drawRoadmapChart(canvas, points, markers);
         const cards = [
@@ -886,7 +1131,8 @@
         const marriageEl = $("dashboard-marriage");
         const wealthEl = $("dashboard-wealth");
         const healthEl = $("dashboard-health-traffic");
-        if (!marriageEl || !wealthEl || !healthEl) return;
+        const warningEl = $("dashboard-warning-radar");
+        if (!marriageEl || !wealthEl || !healthEl || !warningEl) return;
         const marriageCards = [
             ...(eventDashboard?.marriageWindows || []).map((item) => `<div class="mini-card"><p class="section-kicker">正缘窗口</p><h3>${item.year}年</h3><p>${item.note}</p></div>`),
             ...(eventDashboard?.marriageRisk || []).map((item) => `<div class="mini-card"><p class="section-kicker">桃花/关系风险</p><h3>${item.year}年</h3><p class="bad-text">${item.note}</p></div>`)
@@ -902,9 +1148,16 @@
                 <p class="${item.level === "红灯" ? "bad-text" : item.level === "黄灯" ? "" : "good-text"}">${item.note}</p>
             </div>
         `);
+        const warningCards = (eventDashboard?.warningRadar || []).map((item) => `
+            <div class="mini-card warning-card">
+                <h3>${item.year}年 · ${item.pillar}</h3>
+                <p class="bad-text">${item.note}</p>
+            </div>
+        `);
         marriageEl.innerHTML = marriageCards.join("") || `<div class="mini-card"><p>暂无婚姻专题数据。</p></div>`;
         wealthEl.innerHTML = wealthCards.join("") || `<div class="mini-card"><p>暂无财富专题数据。</p></div>`;
         healthEl.innerHTML = healthCards.join("") || `<div class="mini-card"><p>暂无健康红绿灯数据。</p></div>`;
+        warningEl.innerHTML = warningCards.join("") || `<div class="mini-card"><p>暂无特殊预警。</p></div>`;
     }
 
     function renderDomainCharts(yearEvaluations, monthEvaluations) {
@@ -1076,12 +1329,25 @@
                 state.current.compatibility
             )
             : [];
+        const caseMatches = state.current
+            ? KnowledgeBaseEngine.matchCaseEntries(
+                state.current.chart,
+                state.current.currentYearEval,
+                state.current.currentMonthEval,
+                state.current.compatibility,
+                null,
+                5
+            )
+            : [];
         const ragMatches = state.current?.ragMatches || [];
         const merged = mergeKnowledgeMatches(keywordMatches, ragMatches);
         if (state.current) {
             state.current.kbMatches = keywordMatches;
+            state.current.caseMatches = caseMatches;
+            state.current.ragReferences = KnowledgeBaseEngine.buildCitedReferences(merged, 6);
         }
         renderKnowledgeBase(merged);
+        renderCaseSimilarity(caseMatches);
     }
 
     function removeKnowledgeBaseEntry(id) {
@@ -1112,7 +1378,7 @@
                     <p class="section-kicker">关联参考</p>
                     <h3>${escapeHtml(entry.title)}</h3>
                     <p>${escapeHtml(entry.content.slice(0, 180))}${entry.content.length > 180 ? "..." : ""}</p>
-                    <p class="muted">标签：${escapeHtml(entry.tags.join("、") || "未标注")} · 来源：${escapeHtml(entry.source)}${entry.embeddingModel ? ` · 向量 ${escapeHtml(entry.embeddingModel)}` : ""}</p>
+                    <p class="muted">标签：${escapeHtml(entry.tags.join("、") || "未标注")} · 来源：${escapeHtml(entry.source)}${entry.locator ? ` · 定位 ${escapeHtml(entry.locator)}` : ""}${entry.embeddingModel ? ` · 向量 ${escapeHtml(entry.embeddingModel)}` : ""}</p>
                 </div>
             `).join("")
             : `<div class="mini-card"><h3>暂无高相关条目</h3><p>可以导入你整理过的命理笔记、书目摘要、断语索引或案例库，系统会按当前命盘自动匹配相关内容。</p></div>`;
@@ -1121,7 +1387,7 @@
                 <div class="mini-card">
                     <h3>${escapeHtml(entry.title)}</h3>
                     <p>${escapeHtml(entry.content.slice(0, 240))}${entry.content.length > 240 ? "..." : ""}</p>
-                    <p class="muted">标签：${escapeHtml(entry.tags.join("、") || "未标注")} · 来源：${escapeHtml(entry.source)}</p>
+                    <p class="muted">标签：${escapeHtml(entry.tags.join("、") || "未标注")} · 来源：${escapeHtml(entry.source)}${entry.locator ? ` · 定位 ${escapeHtml(entry.locator)}` : ""}</p>
                     ${String(entry.id).startsWith("seed-")
                         ? `<p class="muted">内置条目不可单独删除，可通过“恢复内置书目”重置。</p>`
                         : `<button type="button" class="btn-link" data-kb-remove="${escapeHtml(entry.id)}">删除条目</button>`}
@@ -1131,6 +1397,22 @@
         $("kb-list").querySelectorAll("[data-kb-remove]").forEach((button) => {
             button.addEventListener("click", () => removeKnowledgeBaseEntry(button.dataset.kbRemove));
         });
+    }
+
+    function renderCaseSimilarity(caseMatches) {
+        const container = $("case-similarity");
+        if (!container) return;
+        container.innerHTML = caseMatches && caseMatches.length
+            ? caseMatches.map((entry, index) => `
+                <div class="mini-card">
+                    <p class="section-kicker">相似案例 #${index + 1}</p>
+                    <h3>${escapeHtml(entry.title)}</h3>
+                    <p class="blunt">相似度 ${entry.similarity}%</p>
+                    <p>${escapeHtml(entry.content.slice(0, 200))}${entry.content.length > 200 ? "..." : ""}</p>
+                    <p class="muted">来源：${escapeHtml(entry.source)}${entry.locator ? ` · ${escapeHtml(entry.locator)}` : ""}</p>
+                </div>
+            `).join("")
+            : `<div class="mini-card"><p>暂无可比对案例。可导入带“案例”标签的历史记录以启用相似度匹配。</p></div>`;
     }
 
     async function refreshLlmModels() {
@@ -1191,16 +1473,28 @@
             state.current.compatibility
         );
         let ragMatches = [];
+        let queryEmbedding = null;
         if (config.embeddingModel && KnowledgeBaseEngine.loadEntries().some((entry) => Array.isArray(entry.embedding) && entry.embedding.length)) {
             const queryText = AIEngine.buildKnowledgeQueryText(state.current);
-            const queryEmbedding = await LLMClient.embed(config, config.embeddingModel, queryText);
+            queryEmbedding = await LLMClient.embed(config, config.embeddingModel, queryText);
             ragMatches = KnowledgeBaseEngine.semanticMatchEntries(queryEmbedding, 6);
         }
+        const caseMatches = KnowledgeBaseEngine.matchCaseEntries(
+            state.current.chart,
+            state.current.currentYearEval,
+            state.current.currentMonthEval,
+            state.current.compatibility,
+            queryEmbedding,
+            5
+        );
         state.current.ragMatches = ragMatches;
+        state.current.caseMatches = caseMatches;
         const merged = mergeKnowledgeMatches(keywordMatches, ragMatches);
         state.current.kbMatches = keywordMatches;
+        state.current.ragReferences = KnowledgeBaseEngine.buildCitedReferences(merged, 6);
         renderKnowledgeBase(merged);
-        return merged;
+        renderCaseSimilarity(caseMatches);
+        return state.current.ragReferences;
     }
 
     function renderLlmReport(content, agentReports = {}) {
@@ -1284,7 +1578,7 @@
         $("compatibility-analysis").innerHTML = compatibility.result.sections.map(renderSectionCard).join("");
     }
 
-    function renderAI(report, environment, lucky, modern, detailed, family, master, currentYearEval, currentMonthEval, compatibility, kbMatches) {
+    function renderAI(report, environment, lucky, modern, detailed, family, master, currentYearEval, currentMonthEval, compatibility, kbMatches, caseMatches) {
         const loading = $("ai-loading");
         loading.classList.remove("hidden");
         setTimeout(() => {
@@ -1297,7 +1591,8 @@
                 $("lucky-suggestions").innerHTML += modern.map(renderSectionCard).join("");
             }
             if (kbMatches?.length) {
-                $("lucky-suggestions").innerHTML += `<div class="report-block"><h3>知识库校注</h3><p>本地知识库匹配到：${kbMatches.slice(0, 3).map((entry) => `${entry.title}（${entry.source}）`).join("；")}。这些条目已在下方“本地知识库”中展开，便于对照经典笔记和案例索引进一步细看。</p></div>`;
+                const citations = KnowledgeBaseEngine.buildCitedReferences(mergeKnowledgeMatches(kbMatches, state.current.ragMatches || []), 3);
+                $("lucky-suggestions").innerHTML += `<div class="report-block"><h3>知识库校注</h3><p>本地知识库匹配到：${citations.map((entry) => entry.citation).join("；")}。这些条目已在下方“本地知识库”中展开，可直接追溯出处。</p></div>`;
             }
             $("detailed-analysis-grid").innerHTML = [
                 ...detailed.map(renderSectionCard),
@@ -1307,6 +1602,7 @@
             $("family-analysis-grid").innerHTML = family.map(renderSectionCard).join("");
             renderKeyYearsSummary(state.current.allYearEvaluations || state.current.yearEvaluations);
             renderKnowledgeBase(mergeKnowledgeMatches(kbMatches, state.current.ragMatches || []));
+            renderCaseSimilarity(caseMatches || state.current.caseMatches || []);
             renderCompatibility(compatibility);
         }, 180);
     }
@@ -1397,8 +1693,12 @@
         if (current.compatibility) {
             lines.push("", "## 合盘 / 合婚", ...current.compatibility.result.sections.map(buildSectionMarkdown));
         }
-        if (current.kbMatches?.length) {
-            lines.push("", "## 本地知识库关联参考", ...current.kbMatches.map((entry) => `- ${entry.title}（${entry.source}）：${entry.content.slice(0, 160)}`));
+        if (current.kbMatches?.length || current.ragMatches?.length) {
+            const refs = KnowledgeBaseEngine.buildCitedReferences(mergeKnowledgeMatches(current.kbMatches || [], current.ragMatches || []), 8);
+            lines.push("", "## 本地知识库关联参考", ...refs.map((entry) => `- ${entry.citation}：${entry.excerpt}`));
+        }
+        if (current.caseMatches?.length) {
+            lines.push("", "## 相似案例", ...current.caseMatches.map((entry) => `- ${entry.title}（相似度 ${entry.similarity}%）：${entry.content.slice(0, 140)}`));
         }
         if (current.llmReport) {
             lines.push("", "## LLM 深度报告", current.llmReport);
@@ -1644,6 +1944,7 @@
     bindEvents();
     renderSavedProfiles();
     renderKnowledgeBase([]);
+    renderCaseSimilarity([]);
     updatePreview(PROFILE_CONFIGS.primary);
     updatePreview(PROFILE_CONFIGS.compat);
 })();

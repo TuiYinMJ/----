@@ -63,20 +63,14 @@
                                     <select id="birth-year"></select>
                                 </div>
                                 <div class="form-group">
-                                    <label for="birth-month">出生月份</label>
+                                    <label for="birth-month">出生月份（农历含闰）</label>
                                     <select id="birth-month"></select>
                                 </div>
                                 <div class="form-group">
                                     <label for="birth-day">出生日期</label>
                                     <select id="birth-day"></select>
                                 </div>
-                                <div class="form-group">
-                                    <label for="lunar-leap">闰月</label>
-                                    <select id="lunar-leap">
-                                        <option value="0" selected>否</option>
-                                        <option value="1">是</option>
-                                    </select>
-                                </div>
+                                <input id="lunar-leap" type="hidden" value="0">
                                 <div class="form-group">
                                     <label for="birth-time">出生时间</label>
                                     <input id="birth-time" type="time" value="09:30">
@@ -104,6 +98,7 @@
                                     <select id="day-boundary-sect">
                                         <option value="1" selected>子初换日（23:00 后算次日）</option>
                                         <option value="2">子正换日（00:00 后算次日）</option>
+                                        <option value="3">夜子时分日（日按当日，子时按次日）</option>
                                     </select>
                                 </div>
                                 <div class="form-group">
@@ -119,6 +114,32 @@
                                         <option value="male">男</option>
                                         <option value="female">女</option>
                                     </select>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="geo-provider">地图定位接口</label>
+                                    <select id="geo-provider">
+                                        <option value="none" selected>不使用（手填经度）</option>
+                                        <option value="amap">高德地图 Geocoding</option>
+                                        <option value="tencent">腾讯地图 Geocoding</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="geo-api-key">地图 API Key</label>
+                                    <input id="geo-api-key" type="text" placeholder="填入高德/腾讯 WebService Key">
+                                </div>
+                                <div class="form-group form-group-wide">
+                                    <label for="geo-query">出生地检索（医院/县市）</label>
+                                    <input id="geo-query" type="text" placeholder="例如：上海市第一妇婴保健院">
+                                </div>
+                                <div class="form-group">
+                                    <label>&nbsp;</label>
+                                    <button type="button" class="btn btn-secondary" id="btn-geo-search">地址转经纬度</button>
+                                </div>
+                                <div class="form-group form-group-wide-xl">
+                                    <label>定位结果</label>
+                                    <div id="geo-status" class="preview-panel">未检索。你也可以直接手填经度。</div>
                                 </div>
                             </div>
                             <div class="form-row">
@@ -196,20 +217,14 @@
                                 <select id="compat-year"></select>
                             </div>
                             <div class="form-group">
-                                <label for="compat-month">出生月份</label>
+                                <label for="compat-month">出生月份（农历含闰）</label>
                                 <select id="compat-month"></select>
                             </div>
                             <div class="form-group">
                                 <label for="compat-day">出生日期</label>
                                 <select id="compat-day"></select>
                             </div>
-                            <div class="form-group">
-                                <label for="compat-lunar-leap">闰月</label>
-                                <select id="compat-lunar-leap">
-                                    <option value="0" selected>否</option>
-                                    <option value="1">是</option>
-                                </select>
-                            </div>
+                            <input id="compat-lunar-leap" type="hidden" value="0">
                             <div class="form-group">
                                 <label for="compat-time">出生时间</label>
                                 <input id="compat-time" type="time" value="20:15">
@@ -237,6 +252,7 @@
                                 <select id="compat-day-boundary-sect">
                                     <option value="1" selected>子初换日</option>
                                     <option value="2">子正换日</option>
+                                    <option value="3">夜子时分日</option>
                                 </select>
                             </div>
                             <div class="form-group">
@@ -384,6 +400,14 @@
                         <h3>健康红绿灯（流月）</h3>
                         <div id="dashboard-health-traffic" class="pair-grid"></div>
                     </div>
+                    <div>
+                        <h3>特殊预警雷达</h3>
+                        <div id="dashboard-warning-radar" class="pair-grid"></div>
+                    </div>
+                </div>
+                <div class="card">
+                    <h2>流日择吉（未来 30 天）</h2>
+                    <div id="daily-guide" class="pair-grid"></div>
                 </div>
             </section>
 
@@ -549,6 +573,10 @@
                     </div>
                     <div id="kb-matches" class="pair-grid"></div>
                     <div id="kb-list" class="pair-grid"></div>
+                </div>
+                <div class="card">
+                    <h2>案例相似度</h2>
+                    <div id="case-similarity" class="pair-grid"></div>
                 </div>
             </section>
         </main>

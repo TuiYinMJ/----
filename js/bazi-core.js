@@ -116,6 +116,10 @@
         return new Date(solar.getYear(), solar.getMonth() - 1, solar.getDay(), solar.getHour(), solar.getMinute(), solar.getSecond());
     }
 
+    function minutesBetween(a, b) {
+        return (b.getTime() - a.getTime()) / 60000;
+    }
+
     function getDayOfYear(year, month, day) {
         const start = new Date(year, 0, 0);
         const current = new Date(year, month - 1, day);
@@ -317,23 +321,23 @@
         };
     }
 
-    function pillarFromEightChar(eightChar, label) {
+    function pillarFromEightChar(eightChar, label, override = null) {
         const prefix = { 年柱: "Year", 月柱: "Month", 日柱: "Day", 时柱: "Time" }[label];
-        const stem = eightChar[`get${prefix}Gan`]();
-        const branch = eightChar[`get${prefix}Zhi`]();
-        const hide = eightChar[`get${prefix}HideGan`]();
-        const zhiShen = eightChar[`get${prefix}ShiShenZhi`]();
+        const stem = override?.stem || eightChar[`get${prefix}Gan`]();
+        const branch = override?.branch || eightChar[`get${prefix}Zhi`]();
+        const hide = override?.hidden || eightChar[`get${prefix}HideGan`]();
+        const zhiShen = override?.tenGodZhi || eightChar[`get${prefix}ShiShenZhi`]();
         return {
             label,
             stem,
             branch,
             hidden: Array.isArray(hide) ? hide : [hide],
-            nayin: eightChar[`get${prefix}NaYin`](),
-            tenGod: eightChar[`get${prefix}ShiShenGan`](),
+            nayin: override?.nayin || eightChar[`get${prefix}NaYin`](),
+            tenGod: override?.tenGod || eightChar[`get${prefix}ShiShenGan`](),
             tenGodZhi: Array.isArray(zhiShen) ? zhiShen : [zhiShen],
-            diShi: eightChar[`get${prefix}DiShi`](),
-            xun: eightChar[`get${prefix}Xun`](),
-            xunKong: eightChar[`get${prefix}XunKong`](),
+            diShi: override?.diShi || eightChar[`get${prefix}DiShi`](),
+            xun: override?.xun || eightChar[`get${prefix}Xun`](),
+            xunKong: override?.xunKong || eightChar[`get${prefix}XunKong`](),
             stemElement: STEM_WUXING[STEMS.indexOf(stem)],
             branchElement: BRANCH_WUXING[BRANCHES.indexOf(branch)]
         };
@@ -384,7 +388,13 @@
                 passedDays: 0,
                 remainingDays: 0,
                 totalDays: 1,
-                progress: 0.5
+                progress: 0.5,
+                passedMinutes: 0,
+                remainingMinutes: 0,
+                prevDateText: "",
+                nextDateText: "",
+                criticalBoundary: false,
+                criticalText: "无法获取节气边界时间。"
             };
         }
         const currentDate = toSolarDate(solar);
@@ -393,13 +403,72 @@
         const totalDays = Math.max(1, (nextDate - prevDate) / 86400000);
         const passedDays = clamp((currentDate - prevDate) / 86400000, 0, totalDays);
         const progress = clamp(passedDays / totalDays, 0, 1);
+        const passedMinutes = minutesBetween(prevDate, currentDate);
+        const remainingMinutes = minutesBetween(currentDate, nextDate);
+        const nearestMinutes = Math.min(Math.abs(passedMinutes), Math.abs(remainingMinutes));
         return {
             prevName: prev.getName(),
             nextName: next.getName(),
             passedDays: Number(passedDays.toFixed(2)),
             remainingDays: Number((totalDays - passedDays).toFixed(2)),
             totalDays: Number(totalDays.toFixed(2)),
-            progress: Number(progress.toFixed(4))
+            progress: Number(progress.toFixed(4)),
+            passedMinutes: Number(passedMinutes.toFixed(2)),
+            remainingMinutes: Number(remainingMinutes.toFixed(2)),
+            prevDateText: formatSolar(prev.getSolar()),
+            nextDateText: formatSolar(next.getSolar()),
+            criticalBoundary: nearestMinutes <= 60,
+            criticalText: Math.abs(passedMinutes) <= Math.abs(remainingMinutes)
+                ? `出生时刻在${prev.getName()}后 ${Math.round(Math.abs(passedMinutes))} 分钟。`
+                : `出生时刻在${next.getName()}前 ${Math.round(Math.abs(remainingMinutes))} 分钟。`
+        };
+    }
+
+    function getDayBoundaryModeText(dayBoundarySect) {
+        if (dayBoundarySect === 1) return "子初换日";
+        if (dayBoundarySect === 2) return "子正换日";
+        if (dayBoundarySect === 3) return "夜子时分日";
+        return "子初换日";
+    }
+
+    function getEightCharForBoundary(effectiveSolar, dayBoundarySect) {
+        const baseLunar = effectiveSolar.getLunar();
+        const baseEightChar = baseLunar.getEightChar();
+        const sect = dayBoundarySect === 3 ? 2 : dayBoundarySect;
+        baseEightChar.setSect(sect);
+        const boundaryMeta = {
+            mode: dayBoundarySect,
+            modeText: getDayBoundaryModeText(dayBoundarySect),
+            appliedNightZi: false,
+            note: ""
+        };
+        if (dayBoundarySect !== 3) {
+            return { eightChar: baseEightChar, timeOverride: null, boundaryMeta };
+        }
+        const shichen = getShichenInfo(effectiveSolar);
+        if (shichen.branch !== "子") {
+            boundaryMeta.note = "夜子时分日仅在子时触发；当前时段未触发，按子正换日处理。";
+            return { eightChar: baseEightChar, timeOverride: null, boundaryMeta };
+        }
+        const nextDaySolar = Solar.fromJulianDay(effectiveSolar.getJulianDay() + 1);
+        const nextEightChar = nextDaySolar.getLunar().getEightChar();
+        nextEightChar.setSect(2);
+        boundaryMeta.appliedNightZi = true;
+        boundaryMeta.note = `夜子时分日已触发：日柱按当日，时柱按次日（${nextEightChar.getTimeGan()}${nextEightChar.getTimeZhi()}）。`;
+        return {
+            eightChar: baseEightChar,
+            timeOverride: {
+                stem: nextEightChar.getTimeGan(),
+                branch: nextEightChar.getTimeZhi(),
+                hidden: nextEightChar.getTimeHideGan(),
+                tenGod: nextEightChar.getTimeShiShenGan(),
+                tenGodZhi: nextEightChar.getTimeShiShenZhi(),
+                nayin: nextEightChar.getTimeNaYin(),
+                diShi: nextEightChar.getTimeDiShi(),
+                xun: nextEightChar.getTimeXun(),
+                xunKong: nextEightChar.getTimeXunKong()
+            },
+            boundaryMeta
         };
     }
 
@@ -1002,9 +1071,13 @@
         const preview = buildPreview(input);
         const effectiveSolar = preview.solarMeta.effectiveSolar;
         const effectiveLunar = effectiveSolar.getLunar();
-        const eightChar = effectiveLunar.getEightChar();
-        eightChar.setSect(input.dayBoundarySect);
-        const pillars = ["年柱", "月柱", "日柱", "时柱"].map((label) => pillarFromEightChar(eightChar, label));
+        const boundary = getEightCharForBoundary(effectiveSolar, input.dayBoundarySect);
+        const eightChar = boundary.eightChar;
+        const pillars = ["年柱", "月柱", "日柱", "时柱"].map((label) => (
+            label === "时柱" && boundary.timeOverride
+                ? pillarFromEightChar(eightChar, label, boundary.timeOverride)
+                : pillarFromEightChar(eightChar, label)
+        ));
         const jieQiInfo = getJieBoundaryInfo(effectiveLunar);
         const seasonalState = getSeasonalState(pillars[1].branch);
         const commanderInfo = getMonthCommanderWeights(pillars[1].branch, jieQiInfo.progress);
@@ -1040,6 +1113,7 @@
             shensha: getExpandedShensha(pillars),
             branchRelations,
             solarMeta: preview.solarMeta,
+            boundaryMeta: boundary.boundaryMeta,
             source: {
                 standardSolar: preview.standardSolar,
                 effectiveSolar,
@@ -1092,6 +1166,7 @@
         leakElement,
         controlElement,
         controlledElement,
-        formatSigned
+        formatSigned,
+        getDayBoundaryModeText
     };
 })();

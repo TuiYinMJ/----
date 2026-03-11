@@ -9,6 +9,7 @@
         "4. 重点结合职场、财务、感情、家庭、健康、迁移等现代生活场景。",
         "5. 如果岁运冲到夫妻宫、父母宫、子女宫、用神或忌神，请明确点出来。",
         "6. 如果知识库/RAG给了参考，请把它当作佐证，不要机械照抄。",
+        "6.1 只要使用了知识库内容，必须在句末标注来源编号，如[引用1]；不可编造来源。",
         "7. 输出结构固定为：总论、命局结构、格局与用神、当前大运、当前流年、当前流月、事业、财运、感情、家庭六亲、健康、行动建议。",
         "8. 语气要温和但直接，不套模板，不空泛，不神叨。"
     ].join("\n");
@@ -123,10 +124,13 @@
             family: state.family,
             compatibility: state.compatibility?.result || null,
             references: references.map((entry) => ({
+                citationId: entry.citationId || null,
+                citation: entry.citation || "",
                 title: entry.title,
                 tags: entry.tags,
                 source: entry.source,
-                excerpt: entry.content.slice(0, 360)
+                locator: entry.locator || "",
+                excerpt: (entry.excerpt || entry.content || "").slice(0, 360)
             }))
         };
     }
@@ -135,7 +139,7 @@
         const payload = buildCorePayload(state, references);
         return [
             { role: "system", content: promptTemplate || DEFAULT_PROMPT_TEMPLATE },
-            { role: "user", content: `请基于以下 JSON 数据生成完整中文分析报告，不要复述“我无法确定”之类的空话。\n${JSON.stringify(payload, null, 2)}` }
+            { role: "user", content: `请基于以下 JSON 数据生成完整中文分析报告，不要复述“我无法确定”之类的空话。凡引用 references 中内容，必须使用 [引用n] 形式标注 citationId。\n${JSON.stringify(payload, null, 2)}` }
         ];
     }
 
@@ -146,6 +150,7 @@
         const userPrompt = [
             `请以“${agentKey}”视角分析以下命盘数据。`,
             previous ? `前置 Agent 结论如下，请吸收但不要盲从：\n${previous}` : "",
+            "凡引用 references 中内容，必须在句末标注 [引用n]，n 对应 citationId。",
             `命盘数据：\n${JSON.stringify(payload, null, 2)}`
         ].filter(Boolean).join("\n\n");
         return [

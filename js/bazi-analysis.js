@@ -89,6 +89,14 @@
         壬: { mate: "丁", element: "木" },
         癸: { mate: "戊", element: "火" }
     };
+    const LIU_HE_ELEMENT = {
+        "丑-子": "土",
+        "亥-寅": "木",
+        "卯-戌": "火",
+        "辰-酉": "金",
+        "申-巳": "水",
+        "午-未": "土"
+    };
 
     function stat(stats, key) {
         return stats[key] || 0;
@@ -320,6 +328,162 @@
         return "这段时间不算轻松，硬上容易吃亏，越逞强越容易放大问题。";
     }
 
+    function parsePillarText(pillarText) {
+        const stem = String(pillarText || "").slice(0, 1);
+        const branch = String(pillarText || "").slice(1, 2);
+        if (!BaziCore.STEMS.includes(stem) || !BaziCore.BRANCHES.includes(branch)) return null;
+        return { stem, branch };
+    }
+
+    function hasGodInChart(chart, targetGod) {
+        return chart.pillars.some((pillar) => pillar.tenGod === targetGod || pillar.tenGodZhi.includes(targetGod));
+    }
+
+    function stemControls(stemA, stemB) {
+        const elementA = getStemElement(stemA);
+        const elementB = getStemElement(stemB);
+        return BaziCore.controlElement(elementA) === elementB;
+    }
+
+    function buildDynamicCycleEco(chart, pillarText, context = {}) {
+        const cycle = parsePillarText(pillarText);
+        const dayun = parsePillarText(context.currentDayunLabel || "");
+        const shift = { 木: 0, 火: 0, 土: 0, 金: 0, 水: 0 };
+        const notesPositive = [];
+        const notesNegative = [];
+        const combos = [];
+        const avoid = chart.structure.yongshen?.avoid || [];
+        const branchPool = [...chart.pillars.map((item) => item.branch)];
+        if (dayun) {
+            branchPool.push(dayun.branch);
+            shift[getStemElement(dayun.stem)] += 0.7;
+            shift[getBranchElement(dayun.branch)] += 0.55;
+        }
+        if (cycle) {
+            branchPool.push(cycle.branch);
+            shift[getStemElement(cycle.stem)] += 0.95;
+            shift[getBranchElement(cycle.branch)] += 0.75;
+        }
+
+        [...BaziCore.SAN_HE, ...BaziCore.SAN_HUI].forEach((group) => {
+            const full = group.branches.every((branch) => branchPool.includes(branch));
+            if (!full || !cycle || !group.branches.includes(cycle.branch)) return;
+            const amount = BaziCore.SAN_HE.includes(group) ? 2.45 : 2.1;
+            shift[group.element] += amount;
+            const withDayun = dayun && group.branches.includes(dayun.branch);
+            combos.push({ type: BaziCore.SAN_HE.includes(group) ? "三合局" : "三会方", element: group.element, branches: group.branches.join(""), withDayun });
+            if (group.element === chart.structure.usefulElement || group.element === chart.structure.supportiveElement) {
+                notesPositive.push(`岁运引动 ${group.branches.join("")}${BaziCore.SAN_HE.includes(group) ? "三合" : "三会"}${group.element}局，原局气势被重构，属于关键转折窗口。`);
+            }
+            if (avoid.includes(group.element)) {
+                notesNegative.push(`岁运引动 ${group.branches.join("")}${BaziCore.SAN_HE.includes(group) ? "三合" : "三会"}${group.element}局，忌神聚势，风险会成片出现。`);
+            }
+        });
+
+        if (cycle && dayun && BaziCore.LIU_HE[cycle.branch] === dayun.branch) {
+            const pair = [cycle.branch, dayun.branch].sort().join("-");
+            const element = LIU_HE_ELEMENT[pair];
+            if (element) {
+                shift[element] += 1.2;
+                combos.push({ type: "岁运六合", element, branches: `${cycle.branch}${dayun.branch}`, withDayun: true });
+            }
+        }
+
+        const majorShift = combos.some((item) => item.element === chart.structure.usefulElement || avoid.includes(item.element));
+        return {
+            shift,
+            combos,
+            positive: notesPositive.slice(0, 2),
+            negative: notesNegative.slice(0, 2),
+            majorShift
+        };
+    }
+
+    function detectSpecialAlerts(chart, pillarText, context, gods, dynamicEco) {
+        const alerts = [];
+        const cycle = parsePillarText(pillarText);
+        if (cycle) {
+            chart.pillars.forEach((pillar) => {
+                if (pillar.stem === cycle.stem && pillar.branch === cycle.branch) {
+                    alerts.push({
+                        type: "伏吟",
+                        level: "risk",
+                        severity: 3,
+                        text: `${pillar.label}${pillar.stem}${pillar.branch}与当前岁运同柱（伏吟），事情容易重复发生或反复拉扯。`
+                    });
+                }
+                if (stemControls(cycle.stem, pillar.stem) && BaziCore.CHONG[cycle.branch] === pillar.branch) {
+                    alerts.push({
+                        type: "反吟",
+                        level: "risk",
+                        severity: 3,
+                        text: `当前岁运与${pillar.label}${pillar.stem}${pillar.branch}形成天克地冲（反吟），该宫位事项容易剧烈波动。`
+                    });
+                }
+            });
+        }
+        if (context.currentDayunLabel && context.currentDayunLabel === pillarText) {
+            alerts.push({
+                type: "岁运并临",
+                level: "risk",
+                severity: 3,
+                text: "流年与当前大运干支完全一致（岁运并临），喜忌都会被放大，事件更集中。"
+            });
+        }
+        if ((gods.includes("伤官") && (gods.includes("正官") || hasGodInChart(chart, "正官")))
+            || (gods.includes("正官") && hasGodInChart(chart, "伤官"))) {
+            alerts.push({
+                type: "伤官见官",
+                level: "risk",
+                severity: 2,
+                text: "岁运触发“伤官见官”，工作规则、上下级关系、合规风险要重点管控。"
+            });
+        }
+        if (dynamicEco.majorShift) {
+            const usefulHit = dynamicEco.combos.some((item) => item.element === chart.structure.usefulElement);
+            alerts.push({
+                type: "气数改写",
+                level: usefulHit ? "chance" : "risk",
+                severity: usefulHit ? 2 : 3,
+                text: usefulHit
+                    ? "岁运合化把气势拉到用神侧，属于可借力的转折年。"
+                    : "岁运合化把气势推向忌神侧，属于需要提前止损的转折年。"
+            });
+        }
+        if (context.year === context.dayunStartYear || context.year === context.dayunEndYear) {
+            alerts.push({
+                type: "交脱大运",
+                level: "risk",
+                severity: 1,
+                text: "交脱大运年份，生活与工作节奏通常不稳，适合先稳结构再扩张。"
+            });
+        }
+        return alerts;
+    }
+
+    function applySpecialAlertScores(scores, alerts) {
+        alerts.forEach((alert) => {
+            if (alert.level === "chance") {
+                scores.career += 4;
+                scores.wealth += 4;
+                scores.overall += 3;
+                return;
+            }
+            if (alert.severity >= 3) {
+                scores.relation -= 4;
+                scores.health -= 4;
+                scores.overall -= 6;
+            } else if (alert.severity === 2) {
+                scores.career -= 3;
+                scores.family -= 2;
+                scores.overall -= 4;
+            } else {
+                scores.overall -= 2;
+                scores.family -= 1;
+            }
+        });
+    }
+
     function evaluateCycle(chart, pillarText, scope, meta, context = {}) {
         const dayGan = chart.pillars[2].stem;
         const stem = pillarText[0];
@@ -363,6 +527,25 @@
             scores.relation -= 3;
             scores.family -= 2;
         }
+        const dynamicEco = buildDynamicCycleEco(chart, pillarText, context);
+        Object.entries(dynamicEco.shift).forEach(([element, amount]) => {
+            if (!amount) return;
+            if (element === chart.structure.usefulElement) {
+                scores.career += amount * 2.2;
+                scores.wealth += amount * 2;
+                scores.overall += amount * 1.7;
+            }
+            if (element === chart.structure.supportiveElement) {
+                scores.health += amount * 1.6;
+                scores.family += amount * 1.2;
+                scores.overall += amount * 1.1;
+            }
+            if ((chart.structure.yongshen?.avoid || []).includes(element)) {
+                scores.relation -= amount * 1.8;
+                scores.wealth -= amount * 1.5;
+                scores.overall -= amount * 1.6;
+            }
+        });
         const relationSignals = collectCycleRelations(chart, branch);
         applyCycleRelationScores(scores, relationSignals);
         const timing = evaluateTimingTriggers(chart, branch);
@@ -384,17 +567,8 @@
                 scores.overall += 1.5;
             }
         });
-        const yearMarkers = [];
-        if (context.currentDayunLabel && context.currentDayunLabel === pillarText) {
-            scores.overall -= 2;
-            scores.health -= 2;
-            yearMarkers.push("岁运并临：流年和当前大运干支完全相同，这类年份往往事情更集中，喜忌都会放大。");
-        }
-        if (context.year === context.dayunStartYear || context.year === context.dayunEndYear) {
-            scores.overall -= 2;
-            scores.family -= 2;
-            yearMarkers.push("交脱大运：大运交接附近的年份，节奏通常不稳，容易出现岗位、居所、关系或心态上的切换。");
-        }
+        const specialAlerts = detectSpecialAlerts(chart, pillarText, context, gods, dynamicEco);
+        applySpecialAlertScores(scores, specialAlerts);
         scores.overall = (scores.career + scores.wealth + scores.relation + scores.family + scores.health) / 5;
         Object.keys(scores).forEach((key) => {
             scores[key] = clampScore(scores[key]);
@@ -407,11 +581,27 @@
             meta,
             scores,
             gods,
-            opportunities: [...outcome.opportunities, ...relationNotes.positives, ...elementProfile.positive, ...timing.supportNotes].slice(0, 6),
-            risks: [...outcome.risks, ...relationNotes.negatives, ...elementProfile.negative, ...timing.riskNotes, ...yearMarkers].slice(0, 7),
+            opportunities: [
+                ...outcome.opportunities,
+                ...relationNotes.positives,
+                ...elementProfile.positive,
+                ...dynamicEco.positive,
+                ...timing.supportNotes,
+                ...specialAlerts.filter((item) => item.level === "chance").map((item) => item.text)
+            ].slice(0, 7),
+            risks: [
+                ...outcome.risks,
+                ...relationNotes.negatives,
+                ...elementProfile.negative,
+                ...dynamicEco.negative,
+                ...timing.riskNotes,
+                ...specialAlerts.filter((item) => item.level !== "chance").map((item) => item.text)
+            ].slice(0, 8),
             relationSignals,
             stemCombos,
             timing,
+            dynamicEco,
+            specialAlerts,
             blunt: getBluntLine(scores)
         };
     }
@@ -859,16 +1049,20 @@
         const list = (yearEvaluations || []).map((item) => {
             const triggerCount = item.evaluation?.timing?.hit?.length || 0;
             const releaseCount = item.evaluation?.timing?.release?.length || 0;
+            const alertRiskCount = (item.evaluation?.specialAlerts || []).filter((entry) => entry.level !== "chance").length;
+            const alertChanceCount = (item.evaluation?.specialAlerts || []).filter((entry) => entry.level === "chance").length;
             const riskScore = (100 - item.evaluation.scores.overall) * 0.35
                 + (100 - item.evaluation.scores.relation) * 0.25
                 + (100 - item.evaluation.scores.health) * 0.2
                 + triggerCount * 8
+                + alertRiskCount * 9
                 - releaseCount * 3;
             const chanceScore = item.evaluation.scores.overall * 0.3
                 + item.evaluation.scores.career * 0.25
                 + item.evaluation.scores.wealth * 0.25
                 + item.evaluation.scores.relation * 0.2
                 + releaseCount * 4
+                + alertChanceCount * 7
                 - triggerCount * 3;
             return {
                 ...item,
@@ -882,7 +1076,7 @@
             .map((item) => ({
                 year: item.year,
                 pillar: item.pillar,
-                reason: item.evaluation.risks[0] || item.evaluation.blunt,
+                reason: item.evaluation.specialAlerts?.find((entry) => entry.level !== "chance")?.text || item.evaluation.risks[0] || item.evaluation.blunt,
                 focus: item.evaluation.timing?.hit?.[0]?.focus || "综合"
             }));
         const favorable = [...list]
@@ -891,7 +1085,7 @@
             .map((item) => ({
                 year: item.year,
                 pillar: item.pillar,
-                reason: item.evaluation.opportunities[0] || item.evaluation.blunt,
+                reason: item.evaluation.specialAlerts?.find((entry) => entry.level === "chance")?.text || item.evaluation.opportunities[0] || item.evaluation.blunt,
                 focus: item.evaluation.timing?.release?.[0]?.focus || "综合"
             }));
         return { risky, favorable };
@@ -942,12 +1136,22 @@
                 level: item.evaluation.scores.health <= 58 ? "红灯" : item.evaluation.scores.health <= 66 ? "黄灯" : "绿灯",
                 note: item.evaluation.risks[0]
             }));
+        const warningRadar = [...years]
+            .filter((item) => (item.evaluation.specialAlerts || []).length)
+            .sort((a, b) => (b.evaluation.specialAlerts || []).length - (a.evaluation.specialAlerts || []).length)
+            .slice(0, 5)
+            .map((item) => ({
+                year: item.year,
+                pillar: item.pillar,
+                note: (item.evaluation.specialAlerts || []).map((entry) => entry.type).join("、")
+            }));
         return {
             marriageWindows,
             marriageRisk,
             wealthPeaks,
             wealthPits,
-            healthTraffic
+            healthTraffic,
+            warningRadar
         };
     }
 
@@ -1002,6 +1206,44 @@
         ];
     }
 
+    function buildDailyGuide(chart, dayunLabel, startDate = new Date(), days = 30) {
+        const avoid = chart.structure.yongshen?.avoid || [];
+        const startSolar = Solar.fromDate(startDate);
+        const rows = [];
+        for (let i = 0; i < days; i++) {
+            const solar = Solar.fromJulianDay(startSolar.getJulianDay() + i);
+            const lunar = solar.getLunar();
+            const pillar = lunar.getDayInGanZhiExact();
+            const stem = pillar[0];
+            const branch = pillar[1];
+            const elements = [getStemElement(stem), getBranchElement(branch)];
+            const evalResult = evaluateCycle(chart, pillar, "流日", `${solar.toYmd()} · ${pillar}`, {
+                year: solar.getYear(),
+                month: solar.getMonth(),
+                currentDayunLabel: dayunLabel
+            });
+            const usefulHit = elements.includes(chart.structure.usefulElement) || elements.includes(chart.structure.supportiveElement);
+            const avoidHit = elements.some((element) => avoid.includes(element));
+            const level = evalResult.scores.overall >= 75 || usefulHit
+                ? "宜"
+                : evalResult.scores.overall <= 58 || avoidHit
+                    ? "慎"
+                    : "平";
+            rows.push({
+                date: solar.toYmd(),
+                pillar,
+                score: evalResult.scores.overall,
+                level,
+                note: level === "宜"
+                    ? evalResult.opportunities[0]
+                    : level === "慎"
+                        ? evalResult.risks[0]
+                        : "以稳为主，按计划推进。"
+            });
+        }
+        return rows;
+    }
+
     function getEnvironmentAnalysis(chart, targetYear) {
         const liuNianSolar = Solar.fromYmdHms(targetYear, 6, 15, 12, 0, 0);
         const pillar = liuNianSolar.getLunar().getYearInGanZhiExact();
@@ -1033,6 +1275,7 @@
         getEnvironmentAnalysis,
         buildCriticalYears,
         buildEventDashboard,
-        buildModernLifeAdvice
+        buildModernLifeAdvice,
+        buildDailyGuide
     };
 })();

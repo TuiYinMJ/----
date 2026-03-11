@@ -166,7 +166,13 @@
             if (index < 0 || index >= points.length) return;
             const x = padding + ((width - padding * 2) / Math.max(points.length - 1, 1)) * index;
             const y = height - padding - ((points[index].value - min) / (max - min)) * (height - padding * 2);
-            ctx.fillStyle = marker.type === "wealth" ? "#b45309" : marker.type === "relation" ? "#be123c" : "#0f766e";
+            ctx.fillStyle = marker.type === "wealth"
+                ? "#b45309"
+                : marker.type === "relation"
+                    ? "#be123c"
+                    : marker.type === "warning"
+                        ? "#991b1b"
+                        : "#0f766e";
             ctx.beginPath();
             ctx.arc(x, y, 5.6, 0, Math.PI * 2);
             ctx.fill();
