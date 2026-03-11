@@ -10,6 +10,7 @@
         "5. 如果岁运冲到夫妻宫、父母宫、子女宫、用神或忌神，请明确点出来。",
         "6. 如果知识库/RAG给了参考，请把它当作佐证，不要机械照抄。",
         "6.1 只要使用了知识库内容，必须在句末标注来源编号，如[引用1]；不可编造来源。",
+        "6.2 如果 lifeEvents 提供了历史事件，请先做“校准复盘”，再输出未来判断。",
         "7. 输出结构固定为：总论、命局结构、格局与用神、当前大运、当前流年、当前流月、事业、财运、感情、家庭六亲、健康、行动建议。",
         "8. 语气要温和但直接，不套模板，不空泛，不神叨。"
     ].join("\n");
@@ -96,7 +97,8 @@
             `当前大运 ${state.dayun.current.label}`,
             `当前流年 ${state.input.targetYear} ${state.currentYearEval.meta}`,
             `重点风险 ${joinList(state.currentYearEval.risks)}`,
-            `重点机会 ${joinList(state.currentYearEval.opportunities)}`
+            `重点机会 ${joinList(state.currentYearEval.opportunities)}`,
+            `事件校准 ${(state.lifeEvents || []).map((item) => `${item.year}${item.type}:${item.note}`).join(" | ") || "无"}`
         ].join("；");
     }
 
@@ -123,6 +125,7 @@
             health: state.health,
             family: state.family,
             compatibility: state.compatibility?.result || null,
+            lifeEvents: (state.lifeEvents || []).slice(0, 20),
             references: references.map((entry) => ({
                 citationId: entry.citationId || null,
                 citation: entry.citation || "",

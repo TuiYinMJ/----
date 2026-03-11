@@ -38,6 +38,18 @@
         return payload;
     }
 
+    async function parseErrorResponse(response) {
+        const text = await response.text();
+        let payload = null;
+        try {
+            payload = text ? JSON.parse(text) : null;
+        } catch {
+            payload = null;
+        }
+        const message = payload?.error?.message || payload?.message || text || `HTTP ${response.status}`;
+        throw new Error(message);
+    }
+
     async function listModels(config) {
         if (config.provider === "openai") {
             const response = await fetch(`${buildBaseUrl(config)}/models`, {
@@ -90,6 +102,100 @@
         throw new Error("当前未启用 LLM 接口。");
     }
 
+    async function chatStream(config, model, messages, options = {}) {
+        if (!model) throw new Error("请先选择分析模型。");
+        const onToken = typeof options.onToken === "function" ? options.onToken : null;
+        if (config.provider === "openai") {
+            const response = await fetch(`${buildBaseUrl(config)}/chat/completions`, {
+                method: "POST",
+                headers: buildHeaders(config),
+                body: JSON.stringify({
+                    model,
+                    messages,
+                    stream: true,
+                    temperature: options.temperature ?? 0.7
+                })
+            });
+            if (!response.ok) {
+                await parseErrorResponse(response);
+            }
+            if (!response.body) {
+                return chat(config, model, messages, options);
+            }
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            let buffer = "";
+            let content = "";
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split("\n");
+                buffer = lines.pop() || "";
+                for (const rawLine of lines) {
+                    const line = rawLine.trim();
+                    if (!line || !line.startsWith("data:")) continue;
+                    const data = line.slice(5).trim();
+                    if (!data || data === "[DONE]") continue;
+                    try {
+                        const payload = JSON.parse(data);
+                        const delta = payload?.choices?.[0]?.delta?.content || "";
+                        if (!delta) continue;
+                        content += delta;
+                        if (onToken) onToken(delta, content);
+                    } catch {
+                        // 忽略非 JSON 片段，继续流式读取。
+                    }
+                }
+            }
+            return content;
+        }
+        if (config.provider === "ollama") {
+            const response = await fetch(`${buildBaseUrl(config)}/api/chat`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    model,
+                    messages,
+                    stream: true,
+                    options: { temperature: options.temperature ?? 0.7 }
+                })
+            });
+            if (!response.ok) {
+                await parseErrorResponse(response);
+            }
+            if (!response.body) {
+                return chat(config, model, messages, options);
+            }
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            let buffer = "";
+            let content = "";
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split("\n");
+                buffer = lines.pop() || "";
+                for (const rawLine of lines) {
+                    const line = rawLine.trim();
+                    if (!line) continue;
+                    try {
+                        const payload = JSON.parse(line);
+                        const delta = payload?.message?.content || "";
+                        if (!delta) continue;
+                        content += delta;
+                        if (onToken) onToken(delta, content);
+                    } catch {
+                        // 忽略非法片段
+                    }
+                }
+            }
+            return content;
+        }
+        throw new Error("当前未启用 LLM 接口。");
+    }
+
     async function embed(config, model, input) {
         if (!model) throw new Error("请先填写向量模型。");
         if (config.provider === "openai") {
@@ -116,6 +222,7 @@
     window.LLMClient = {
         listModels,
         chat,
+        chatStream,
         embed
     };
 })();

@@ -2,6 +2,7 @@
     const STORAGE_KEY = "tming-bazi-profiles-v4";
     const AI_CONFIG_KEY = "tming-ai-config-v1";
     const GEO_CONFIG_KEY = "tming-geo-config-v1";
+    const LIFE_EVENT_KEY = "tming-life-events-v1";
     const LUNAR_MONTH_NAMES = ["正月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "冬月", "腊月"];
     const REGIONS = [
         { name: "上海", longitude: 121.47, timezoneOffset: 8 },
@@ -83,7 +84,7 @@
         }
     };
 
-    const state = { current: null, ai: null };
+    const state = { current: null, ai: null, inputStep: 1, calendarSelection: { year: null, month: null, selectedDate: null } };
     const TRUE_SOLAR_GROUPS = {
         high: "建议重点核对真太阳时（偏差 >= 40 分钟）",
         low: "通常标准时即可（偏差 < 40 分钟）",
@@ -98,6 +99,7 @@
         return {
             provider: "none",
             workflowMode: "multi",
+            streamMode: "stream",
             baseUrl: "",
             apiKey: "",
             model: "",
@@ -139,6 +141,19 @@
         const merged = { ...defaultGeoConfig(), ...config };
         localStorage.setItem(GEO_CONFIG_KEY, JSON.stringify(merged));
         return merged;
+    }
+
+    function loadLifeEvents() {
+        try {
+            const rows = JSON.parse(localStorage.getItem(LIFE_EVENT_KEY) || "[]");
+            return Array.isArray(rows) ? rows.filter((item) => item && item.id && item.year && item.type && item.note) : [];
+        } catch {
+            return [];
+        }
+    }
+
+    function saveLifeEvents(events) {
+        localStorage.setItem(LIFE_EVENT_KEY, JSON.stringify((events || []).slice(0, 120)));
     }
 
     function pad(value) {
@@ -344,6 +359,9 @@
         initProfileControls(PROFILE_CONFIGS.primary, new Date().getFullYear() - 30, 6, 18, 0);
         initProfileControls(PROFILE_CONFIGS.compat, new Date().getFullYear() - 28, 10, 9, 0);
         fillSelect(PROFILE_CONFIGS.primary.targetYear, 1900, 2099, new Date().getFullYear());
+        fillSelect("life-event-year", 1900, 2099, new Date().getFullYear());
+        fillSelect("daily-calendar-year", 1900, 2099, new Date().getFullYear());
+        fillSelect("daily-calendar-month", 1, 12, new Date().getMonth() + 1);
         renderGeoSuggestions();
         renderAiConfig(loadAiConfig());
         renderGeoConfig(loadGeoConfig());
@@ -352,6 +370,7 @@
     function renderAiConfig(config) {
         $("llm-provider").value = config.provider;
         $("llm-workflow-mode").value = config.workflowMode || "multi";
+        $("llm-stream-mode").value = config.streamMode || "stream";
         $("llm-base-url").value = config.baseUrl;
         $("llm-api-key").value = config.apiKey;
         $("embedding-model").value = config.embeddingModel;
@@ -360,13 +379,14 @@
             ? `<option value="${escapeHtml(config.model)}" selected>${escapeHtml(config.model)}</option>`
             : `<option value="">请先获取模型</option>`;
         state.ai = config;
-        renderLlmStatus(`当前模式：${config.provider === "none" ? "仅本地规则引擎" : config.provider === "openai" ? "OpenAI 兼容接口" : "Ollama"}；工作流：${config.workflowMode === "multi" ? "多 Agent" : "单次直出"}。${config.model ? `已选择模型 ${config.model}。` : "尚未选择模型。"}${config.embeddingModel ? ` 向量模型 ${config.embeddingModel}。` : ""}`);
+        renderLlmStatus(`当前模式：${config.provider === "none" ? "仅本地规则引擎" : config.provider === "openai" ? "OpenAI 兼容接口" : "Ollama"}；工作流：${config.workflowMode === "multi" ? "多 Agent" : "单次直出"}；输出：${config.streamMode === "stream" ? "流式" : "整段"}。${config.model ? `已选择模型 ${config.model}。` : "尚未选择模型。"}${config.embeddingModel ? ` 向量模型 ${config.embeddingModel}。` : ""}`);
     }
 
     function getAiConfigFromForm() {
         return {
             provider: $("llm-provider").value,
             workflowMode: $("llm-workflow-mode").value || "multi",
+            streamMode: $("llm-stream-mode").value || "stream",
             baseUrl: $("llm-base-url").value.trim(),
             apiKey: $("llm-api-key").value.trim(),
             model: $("llm-model").value.trim(),
@@ -413,6 +433,17 @@
         modal.setAttribute("aria-hidden", "true");
     }
 
+    function setInputStep(step) {
+        const safeStep = step === 2 ? 2 : 1;
+        state.inputStep = safeStep;
+        document.querySelectorAll("[data-step-panel]").forEach((panel) => {
+            panel.classList.toggle("active", Number(panel.dataset.stepPanel) === safeStep);
+        });
+        document.querySelectorAll("[data-step-to]").forEach((chip) => {
+            chip.classList.toggle("active", Number(chip.dataset.stepTo) === safeStep);
+        });
+    }
+
     function bindEvents() {
         document.querySelectorAll(".nav-links a").forEach((link) => {
             link.addEventListener("click", (event) => {
@@ -429,6 +460,7 @@
         $("btn-export-markdown").addEventListener("click", exportMarkdownReport);
         $("btn-export-html").addEventListener("click", exportHtmlReport);
         $("btn-print-report").addEventListener("click", printReport);
+        $("btn-export-poster").addEventListener("click", exportPosterImage);
         $("btn-llm-models").addEventListener("click", refreshLlmModels);
         $("btn-llm-generate").addEventListener("click", generateLlmReport);
         $("btn-kb-reindex").addEventListener("click", rebuildKnowledgeVectors);
@@ -440,6 +472,14 @@
         $("btn-geo-search").addEventListener("click", geocodeBirthPlace);
         $("btn-open-settings").addEventListener("click", openSettingsModal);
         $("btn-close-settings").addEventListener("click", closeSettingsModal);
+        $("btn-step-next").addEventListener("click", () => setInputStep(2));
+        $("btn-step-prev").addEventListener("click", () => setInputStep(1));
+        document.querySelectorAll("[data-step-to]").forEach((node) => {
+            node.addEventListener("click", () => setInputStep(Number(node.dataset.stepTo)));
+        });
+        $("btn-life-event-add").addEventListener("click", addLifeEventFromForm);
+        $("daily-calendar-year").addEventListener("change", renderDailyCalendar);
+        $("daily-calendar-month").addEventListener("change", renderDailyCalendar);
         $("btn-save-settings").addEventListener("click", () => {
             persistGeoConfigFromForm();
             closeSettingsModal();
@@ -451,7 +491,7 @@
         document.addEventListener("keydown", (event) => {
             if (event.key === "Escape") closeSettingsModal();
         });
-        ["llm-provider", "llm-workflow-mode", "llm-base-url", "llm-api-key", "llm-model", "embedding-model", "llm-prompt-template"].forEach((id) => {
+        ["llm-provider", "llm-workflow-mode", "llm-stream-mode", "llm-base-url", "llm-api-key", "llm-model", "embedding-model", "llm-prompt-template"].forEach((id) => {
             $(id).addEventListener("change", persistAiConfigFromForm);
             $(id).addEventListener("input", persistAiConfigFromForm);
         });
@@ -648,6 +688,63 @@
         }
     }
 
+    function lifeEventTypeLabel(type) {
+        return {
+            career: "事业",
+            wealth: "财务",
+            relationship: "感情/婚姻",
+            family: "家庭/子女",
+            health: "健康",
+            relocation: "迁移/搬家"
+        }[type] || type;
+    }
+
+    function renderLifeEvents() {
+        const events = loadLifeEvents().sort((a, b) => a.year - b.year);
+        const container = $("life-events-list");
+        if (!container) return;
+        container.innerHTML = events.length
+            ? events.map((item) => `
+                <div class="mini-card">
+                    <p class="section-kicker">${item.year} · ${lifeEventTypeLabel(item.type)}</p>
+                    <p>${escapeHtml(item.note)}</p>
+                    <button type="button" class="btn-link" data-life-event-remove="${escapeHtml(item.id)}">删除</button>
+                </div>
+            `).join("")
+            : `<div class="mini-card"><p>尚未添加校准事件。建议先录入 2-5 个关键事件，再生成 AI 报告。</p></div>`;
+        container.querySelectorAll("[data-life-event-remove]").forEach((node) => {
+            node.addEventListener("click", () => removeLifeEvent(node.dataset.lifeEventRemove));
+        });
+    }
+
+    function removeLifeEvent(id) {
+        const next = loadLifeEvents().filter((item) => String(item.id) !== String(id));
+        saveLifeEvents(next);
+        renderLifeEvents();
+        if (state.current) state.current.lifeEvents = next;
+    }
+
+    function addLifeEventFromForm() {
+        const year = Number($("life-event-year").value);
+        const type = $("life-event-type").value;
+        const note = $("life-event-note").value.trim();
+        if (!note) {
+            alert("请先填写事件描述。");
+            return;
+        }
+        const events = loadLifeEvents();
+        events.push({
+            id: `evt-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+            year,
+            type,
+            note
+        });
+        saveLifeEvents(events);
+        $("life-event-note").value = "";
+        renderLifeEvents();
+        if (state.current) state.current.lifeEvents = events;
+    }
+
     function syncLunarLeap(config) {
         const selection = getMonthSelection(config);
         $(config.lunarLeap).value = selection.lunarLeap ? "1" : "0";
@@ -746,6 +843,29 @@
         return { hour, minute };
     }
 
+    function renderMiniBaziPreview(input) {
+        const shell = $("mini-bazi-preview");
+        if (!shell) return;
+        try {
+            const chart = BaziCore.computeBaZi(input);
+            const pillars = chart.pillars.map((pillar) => `
+                <div class="mini-pillar">
+                    <div class="mini-pillar-label">${pillar.label.replace("柱", "")}</div>
+                    <div class="mini-pillar-main">${pillar.stem}${pillar.branch}</div>
+                    <div class="mini-pillar-meta">${pillar.tenGod}</div>
+                </div>
+            `).join("");
+            shell.innerHTML = `
+                <div class="mini-bazi-pillars">${pillars}</div>
+                <div class="preview-line"><span>日主强弱</span><strong>${chart.structure.strength}</strong></div>
+                <div class="preview-line"><span>格局</span><strong>${chart.structure.pattern.finalPattern}</strong></div>
+                <div class="preview-line"><span>用神</span><strong>${chart.structure.usefulElement}（辅：${chart.structure.supportiveElement}）</strong></div>
+            `;
+        } catch (error) {
+            shell.innerHTML = `<div class="mini-card"><p class="muted">迷你命盘暂不可展示：${escapeHtml(error.message)}</p></div>`;
+        }
+    }
+
     function getProfileInput(config) {
         if (config.enabled && !$(config.enabled).checked) return null;
         const { hour, minute } = getTimeParts(config);
@@ -805,18 +925,18 @@
             const inputTypeText = input.calendarType === "solar"
                 ? `公历录入：${preview.standardSolar.toYmdHms().slice(0, 16)}`
                 : `农历录入：${input.year}年${input.lunarLeap ? "闰" : ""}${lunarMonthLabel(input.month)}${input.day}日 ${pad(input.hour)}:${pad(input.minute)}`;
+            if (config === PROFILE_CONFIGS.primary) {
+                renderMiniBaziPreview(input);
+            }
             $(config.preview).innerHTML = `
                 <div class="preview-line"><span>录入值</span><strong>${inputTypeText}</strong></div>
-                <div class="preview-line"><span>标准公历</span><strong>${preview.standardSolar.toYmdHms().slice(0, 16)}</strong></div>
-                <div class="preview-line"><span>标准农历</span><strong>${preview.standardLunar.toString()}</strong></div>
-                <div class="preview-line"><span>标准时辰</span><strong>${preview.solarMeta.standardShichen.label}（${preview.solarMeta.standardShichen.start}-${preview.solarMeta.standardShichen.end}）</strong></div>
-                <div class="preview-line"><span>真太阳时</span><strong>${preview.solarMeta.trueSolarText} · ${preview.solarMeta.trueSolarShichen.label}</strong></div>
-                <div class="preview-line"><span>最终排盘</span><strong>${preview.solarMeta.usedMode === "trueSolar" ? "真太阳时" : "标准时间"} · ${preview.solarMeta.effectiveText}</strong></div>
+                <div class="preview-line"><span>公历 / 农历</span><strong>${preview.standardSolar.toYmdHms().slice(0, 16)} ↔ ${preview.standardLunar.toString()}</strong></div>
+                <div class="preview-line"><span>真太阳时</span><strong>${preview.solarMeta.trueSolarText}</strong></div>
+                <div class="preview-line"><span>最终排盘依据</span><strong>${preview.solarMeta.usedMode === "trueSolar" ? "真太阳时" : "标准时间"} · ${preview.solarMeta.effectiveText}</strong></div>
+                <div class="preview-line"><span>重点提示</span><strong>${preview.solarMeta.autoUseTrueSolar ? solarExplain : recommendation}</strong></div>
+                <div class="preview-line"><span>闰月识别</span><strong>${leapHint}</strong></div>
                 <div class="preview-line"><span>地区分组</span><strong>${regionGroup}</strong></div>
                 <div class="preview-line"><span>地区说明</span><strong>${getRegionGroupNote(region)}</strong></div>
-                <div class="preview-line"><span>闰月识别</span><strong>${leapHint}</strong></div>
-                <div class="preview-line"><span>真太阳时说明</span><strong>${solarExplain}</strong></div>
-                <div class="preview-line"><span>自动建议</span><strong>${recommendation}</strong></div>
             `;
         } catch (error) {
             $(config.preview).innerHTML = `<p class="muted">当前输入无法换算，请检查日期、闰月或时间：${error.message}</p>`;
@@ -918,6 +1038,7 @@
         const modern = BaziAnalysis.buildModernLifeAdvice(chart, compatibility?.result || null, primaryInput.targetYear);
         const kbMatches = KnowledgeBaseEngine.matchEntries(chart, currentYearEval, currentMonthEval, compatibility);
         const caseMatches = KnowledgeBaseEngine.matchCaseEntries(chart, currentYearEval, currentMonthEval, compatibility, null, 5);
+        const lifeEvents = loadLifeEvents();
         state.current = {
             input: primaryInput,
             chart,
@@ -937,6 +1058,7 @@
             eventDashboard,
             dailyGuide,
             compatibility,
+            lifeEvents,
             kbMatches,
             caseMatches,
             ragMatches: [],
@@ -953,6 +1075,8 @@
     function renderAll() {
         const { input, chart, dayun, yearEvaluations, monthEvaluations, allYearEvaluations, eventDashboard, criticalYears, dailyGuide, currentYearEval, currentMonthEval, health, environment, detailed, family, master, modern, compatibility, kbMatches, caseMatches, report, lucky } = state.current;
         $(PROFILE_CONFIGS.primary.targetYear).value = String(input.targetYear);
+        $("daily-calendar-year").value = String(input.targetYear);
+        $("daily-calendar-month").value = String(new Date().getMonth() + 1);
         $("env-year-label").textContent = input.targetYear;
         $("liuyue-year-label").textContent = input.targetYear;
         renderCalculationMeta(chart, dayun);
@@ -966,6 +1090,7 @@
         renderDayun(dayun, yearEvaluations, monthEvaluations, allYearEvaluations, eventDashboard, criticalYears, dailyGuide);
         renderHealth(health, yearEvaluations, monthEvaluations);
         renderAI(report, environment, lucky, modern, detailed, family, master, currentYearEval, currentMonthEval, compatibility, kbMatches, caseMatches);
+        renderDailyCalendar();
     }
 
     function renderCalculationMeta(chart, dayun) {
@@ -1185,6 +1310,100 @@
                 <p>${item.note}</p>
             </div>
         `).join("") || `<div class="mini-card"><p>暂无流日数据。</p></div>`;
+    }
+
+    const HOUR_WINDOWS = [
+        { label: "子时", hour: 23, range: "23:00-00:59" },
+        { label: "丑时", hour: 1, range: "01:00-02:59" },
+        { label: "寅时", hour: 3, range: "03:00-04:59" },
+        { label: "卯时", hour: 5, range: "05:00-06:59" },
+        { label: "辰时", hour: 7, range: "07:00-08:59" },
+        { label: "巳时", hour: 9, range: "09:00-10:59" },
+        { label: "午时", hour: 11, range: "11:00-12:59" },
+        { label: "未时", hour: 13, range: "13:00-14:59" },
+        { label: "申时", hour: 15, range: "15:00-16:59" },
+        { label: "酉时", hour: 17, range: "17:00-18:59" },
+        { label: "戌时", hour: 19, range: "19:00-20:59" },
+        { label: "亥时", hour: 21, range: "21:00-22:59" }
+    ];
+
+    function buildHourlyWindowGuide(dateText) {
+        if (!state.current) return [];
+        const [year, month, day] = String(dateText || "").split("-").map(Number);
+        if (!year || !month || !day) return [];
+        return HOUR_WINDOWS.map((windowItem) => {
+            const solar = Solar.fromYmdHms(year, month, day, windowItem.hour, 0, 0);
+            const lunar = solar.getLunar();
+            const pillar = lunar.getTimeInGanZhi();
+            const evaluation = BaziAnalysis.evaluateCycle(
+                state.current.chart,
+                pillar,
+                "流时",
+                `${dateText} ${windowItem.label} · ${pillar}`,
+                {
+                    year,
+                    month,
+                    day,
+                    currentDayunLabel: state.current.dayun.current.label
+                }
+            );
+            const alerts = evaluation.specialAlerts || [];
+            const attack = alerts.find((entry) => entry.type === "伤官见官");
+            const note = attack
+                ? `${windowItem.range} 容易出现“伤官见官”型冲突，和上级沟通要先讲事实再讲立场。`
+                : evaluation.scores.relation <= 58
+                    ? `${windowItem.range} 人际摩擦偏高，重要沟通建议先发书面要点。`
+                    : evaluation.scores.career >= 74
+                        ? `${windowItem.range} 执行力较强，适合推进谈判、汇报、签署。`
+                        : `${windowItem.range} 以稳为主，适合整理与复盘。`;
+            return {
+                ...windowItem,
+                score: evaluation.scores.overall,
+                note,
+                alerts
+            };
+        });
+    }
+
+    function renderDailyCalendar() {
+        const grid = $("daily-calendar-grid");
+        const detail = $("daily-calendar-detail");
+        if (!grid || !detail || !state.current) return;
+        const year = Number($("daily-calendar-year").value || state.current.input.targetYear);
+        const month = Number($("daily-calendar-month").value || (new Date().getMonth() + 1));
+        const dayCount = new Date(year, month, 0).getDate();
+        const rows = BaziAnalysis.buildDailyGuide(state.current.chart, state.current.dayun.current.label, new Date(year, month - 1, 1), dayCount);
+        if (!rows.length) {
+            grid.innerHTML = `<div class="mini-card"><p>当前月份暂无日历数据。</p></div>`;
+            detail.innerHTML = `<p class="muted">请选择其他月份。</p>`;
+            return;
+        }
+        const selectedDate = state.calendarSelection.selectedDate && rows.some((item) => item.date === state.calendarSelection.selectedDate)
+            ? state.calendarSelection.selectedDate
+            : rows[0].date;
+        state.calendarSelection = { year, month, selectedDate };
+        grid.innerHTML = rows.map((item) => `
+            <button type="button" class="calendar-day ${item.level === "宜" ? "lv-good" : item.level === "慎" ? "lv-bad" : "lv-mid"} ${item.date === selectedDate ? "active" : ""}" data-calendar-date="${item.date}">
+                <span class="date">${Number(item.date.split("-")[2])}</span>
+                <span class="lvl">${item.level} · ${item.score}</span>
+            </button>
+        `).join("");
+        const selected = rows.find((item) => item.date === selectedDate) || rows[0];
+        const hourlyGuide = buildHourlyWindowGuide(selected.date);
+        const best = [...hourlyGuide].sort((a, b) => b.score - a.score).slice(0, 2);
+        const risky = [...hourlyGuide].sort((a, b) => a.score - b.score).slice(0, 2);
+        detail.innerHTML = [
+            `<p><strong>${selected.date}</strong>（${selected.pillar}） · ${selected.level} · 评分 ${selected.score}</p>`,
+            `<p class="good-text">日内顺时段：${best.map((item) => `${item.label}(${item.range})`).join("、")}</p>`,
+            `<p class="bad-text">日内谨慎时段：${risky.map((item) => `${item.label}(${item.range})`).join("、")}</p>`,
+            `<p>重点提醒：${risky[0]?.note || selected.note}</p>`
+        ].join("");
+        grid.querySelectorAll("[data-calendar-date]").forEach((button) => {
+            button.addEventListener("click", () => {
+                state.calendarSelection.selectedDate = button.dataset.calendarDate;
+                renderDailyCalendar();
+            });
+        });
     }
 
     function renderLifeRoadmap(allYearEvaluations, criticalYears) {
@@ -1626,6 +1845,20 @@
             : "";
     }
 
+    async function requestLlmContent(config, model, messages, options = {}, onUpdate = null) {
+        if (config.streamMode === "stream") {
+            return LLMClient.chatStream(config, model, messages, {
+                ...options,
+                onToken: (_, fullText) => {
+                    if (onUpdate) onUpdate(fullText);
+                }
+            });
+        }
+        const content = await LLMClient.chat(config, model, messages, options);
+        if (onUpdate) onUpdate(content);
+        return content;
+    }
+
     async function generateLlmReport() {
         const current = ensureReportState();
         if (!current) return;
@@ -1646,7 +1879,17 @@
                 for (const agent of AIEngine.MULTI_AGENT_SEQUENCE || []) {
                     renderLlmStatus(`正在调用 ${agent.title}...`);
                     const messages = AIEngine.buildAgentPromptMessages(current, config.promptTemplate, references, agent.key, outputs);
-                    const content = await LLMClient.chat(config, config.model, messages, { temperature: agent.key === "master" ? 0.6 : 0.75 });
+                    const content = await requestLlmContent(
+                        config,
+                        config.model,
+                        messages,
+                        { temperature: agent.key === "master" ? 0.6 : 0.75 },
+                        (partial) => {
+                            outputs[agent.key] = partial;
+                            const currentMaster = outputs.master || outputs[AIEngine.MULTI_AGENT_SEQUENCE[AIEngine.MULTI_AGENT_SEQUENCE.length - 1].key] || "";
+                            renderLlmReport(currentMaster, outputs);
+                        }
+                    );
                     outputs[agent.key] = content;
                 }
                 current.agentReports = outputs;
@@ -1655,7 +1898,13 @@
                 renderLlmStatus(`多 Agent 报告生成完成，使用模型 ${config.model}。`);
             } else {
                 const messages = AIEngine.buildPromptMessages(current, config.promptTemplate, references);
-                const content = await LLMClient.chat(config, config.model, messages, { temperature: 0.7 });
+                const content = await requestLlmContent(
+                    config,
+                    config.model,
+                    messages,
+                    { temperature: 0.7 },
+                    (partial) => renderLlmReport(partial, {})
+                );
                 current.llmReport = content;
                 current.agentReports = {};
                 renderLlmReport(content, {});
@@ -1704,6 +1953,9 @@
             if (modern?.length) {
                 $("lucky-suggestions").innerHTML += modern.map(renderSectionCard).join("");
             }
+            if ((state.current.lifeEvents || []).length) {
+                $("lucky-suggestions").innerHTML += `<div class="report-block"><h3>事件校准上下文</h3><p>已加载 ${(state.current.lifeEvents || []).length} 条历史事件作为推演校准：${state.current.lifeEvents.slice(0, 4).map((item) => `${item.year}年${lifeEventTypeLabel(item.type)}（${escapeHtml(item.note)}）`).join("；")}。</p></div>`;
+            }
             if (kbMatches?.length) {
                 const citations = KnowledgeBaseEngine.buildCitedReferences(mergeKnowledgeMatches(kbMatches, state.current.ragMatches || []), 3);
                 $("lucky-suggestions").innerHTML += `<div class="report-block"><h3>知识库校注</h3><p>本地知识库匹配到：${citations.map((entry) => entry.citation).join("；")}。这些条目已在下方“本地知识库”中展开，可直接追溯出处。</p></div>`;
@@ -1749,6 +2001,11 @@
             `- 月令司令：${current.chart.structure.commanderInfo.weights.map((item) => `${item.stem}${item.element} ${Math.round(item.weight * 100)}%`).join("、")}`,
             `- 格局：${current.chart.structure.pattern.finalPattern} · 用神 ${current.chart.structure.usefulElement} · 辅助 ${current.chart.structure.supportiveElement}`,
             `- 当前大运：${current.dayun.current.label}（${current.dayun.current.startYear}-${current.dayun.current.endYear}）`,
+            "",
+            "## 事件校准",
+            ...((current.lifeEvents || []).length
+                ? current.lifeEvents.map((item) => `- ${item.year}年 ${lifeEventTypeLabel(item.type)}：${item.note}`)
+                : ["- 未录入历史事件。"]),
             "",
             "## 八字四柱",
             ...current.chart.pillars.map((pillar) => `- ${pillar.label}：${pillar.stem}${pillar.branch} · 天干十神 ${pillar.tenGod} · 地支十神 ${pillar.tenGodZhi.join("、")} · 藏干 ${pillar.hidden.join("、")}`),
@@ -1869,6 +2126,149 @@
 </head>
 <body>${htmlLines.join("")}</body>
 </html>`;
+    }
+
+    function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight) {
+        const content = String(text || "");
+        let line = "";
+        const rows = [];
+        for (const char of content) {
+            const candidate = line + char;
+            if (ctx.measureText(candidate).width > maxWidth && line) {
+                rows.push(line);
+                line = char;
+            } else {
+                line = candidate;
+            }
+        }
+        if (line) rows.push(line);
+        rows.forEach((row, index) => {
+            ctx.fillText(row, x, y + index * lineHeight);
+        });
+        return rows.length * lineHeight;
+    }
+
+    function exportPosterImage() {
+        const current = ensureReportState();
+        if (!current) return;
+        const canvas = document.createElement("canvas");
+        canvas.width = 1240;
+        canvas.height = 1820;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        const drawRoundCard = (x, y, w, h, r) => {
+            if (typeof ctx.roundRect === "function") {
+                ctx.beginPath();
+                ctx.roundRect(x, y, w, h, r);
+                return;
+            }
+            const radius = Math.min(r, w / 2, h / 2);
+            ctx.beginPath();
+            ctx.moveTo(x + radius, y);
+            ctx.arcTo(x + w, y, x + w, y + h, radius);
+            ctx.arcTo(x + w, y + h, x, y + h, radius);
+            ctx.arcTo(x, y + h, x, y, radius);
+            ctx.arcTo(x, y, x + w, y, radius);
+            ctx.closePath();
+        };
+        const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+        gradient.addColorStop(0, "#fff7ec");
+        gradient.addColorStop(1, "#f3e7d2");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#9a3412";
+        ctx.font = "bold 56px 'Noto Serif SC', 'Songti SC', serif";
+        ctx.fillText("天命 · 八字命盘海报", 72, 96);
+        ctx.fillStyle = "#4a3320";
+        ctx.font = "30px 'Noto Serif SC', 'Songti SC', serif";
+        ctx.fillText(`档案：${current.input.profileName}`, 72, 152);
+        ctx.font = "24px 'Noto Serif SC', 'Songti SC', serif";
+        ctx.fillText(`排盘时间：${current.chart.solarMeta.effectiveText}（${current.chart.solarMeta.usedMode === "trueSolar" ? "真太阳时" : "标准时间"}）`, 72, 194);
+        ctx.fillText(`出生地：${current.input.regionName}  经度 ${Number(current.input.longitude).toFixed(4)}`, 72, 228);
+
+        const pillarX = 72;
+        const pillarY = 282;
+        const boxW = 258;
+        const boxH = 218;
+        const gap = 20;
+        current.chart.pillars.forEach((pillar, index) => {
+            const x = pillarX + (boxW + gap) * index;
+            ctx.fillStyle = "rgba(255,255,255,0.88)";
+            ctx.strokeStyle = "rgba(154,52,18,0.35)";
+            ctx.lineWidth = 2;
+            drawRoundCard(x, pillarY, boxW, boxH, 18);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = "#7a4a25";
+            ctx.font = "24px 'Noto Serif SC', 'Songti SC', serif";
+            ctx.fillText(pillar.label.replace("柱", ""), x + 18, pillarY + 38);
+            ctx.fillStyle = "#1f2937";
+            ctx.font = "bold 56px 'Noto Serif SC', 'Songti SC', serif";
+            ctx.fillText(`${pillar.stem}${pillar.branch}`, x + 18, pillarY + 108);
+            ctx.fillStyle = "#374151";
+            ctx.font = "21px 'Noto Serif SC', 'Songti SC', serif";
+            ctx.fillText(`十神：${pillar.tenGod}`, x + 18, pillarY + 146);
+            ctx.fillStyle = "#6b7280";
+            ctx.font = "18px 'Noto Serif SC', 'Songti SC', serif";
+            ctx.fillText(`藏干：${pillar.hidden.join("、")}`, x + 18, pillarY + 180);
+        });
+
+        ctx.fillStyle = "#7a4a25";
+        ctx.font = "bold 34px 'Noto Serif SC', 'Songti SC', serif";
+        ctx.fillText("五行强弱", 72, 580);
+        const wuxing = current.chart.wuxing;
+        const max = Math.max(...Object.values(wuxing));
+        let rowY = 622;
+        Object.entries(wuxing).forEach(([element, value]) => {
+            const barW = Math.round((value / Math.max(max, 0.01)) * 420);
+            ctx.fillStyle = current.chart.colors[element] || "#9a3412";
+            ctx.fillRect(160, rowY - 18, barW, 20);
+            ctx.fillStyle = "#1f2937";
+            ctx.font = "22px 'Noto Serif SC', 'Songti SC', serif";
+            ctx.fillText(`${element}`, 82, rowY);
+            ctx.fillText(String(value.toFixed(1)), 600, rowY);
+            rowY += 40;
+        });
+
+        ctx.fillStyle = "#7a4a25";
+        ctx.font = "bold 34px 'Noto Serif SC', 'Songti SC', serif";
+        ctx.fillText("核心断语", 72, 830);
+        ctx.fillStyle = "#2f2418";
+        ctx.font = "24px 'Noto Serif SC', 'Songti SC', serif";
+        let nextY = 872;
+        nextY += drawWrappedText(ctx, `总评：${current.currentYearEval.blunt}`, 72, nextY, 1090, 34) + 8;
+        nextY += drawWrappedText(ctx, `有利：${joinItems(current.currentYearEval.opportunities)}`, 72, nextY, 1090, 34) + 8;
+        nextY += drawWrappedText(ctx, `风险：${joinItems(current.currentYearEval.risks)}`, 72, nextY, 1090, 34) + 8;
+        if ((current.lifeEvents || []).length) {
+            const calibrationText = current.lifeEvents.slice(0, 3).map((item) => `${item.year}${lifeEventTypeLabel(item.type)}:${item.note}`).join("；");
+            nextY += drawWrappedText(ctx, `校准事件：${calibrationText}`, 72, nextY, 1090, 34) + 8;
+        }
+
+        ctx.fillStyle = "#7a4a25";
+        ctx.font = "bold 34px 'Noto Serif SC', 'Songti SC', serif";
+        ctx.fillText("关键年份", 72, nextY + 36);
+        ctx.fillStyle = "#2f2418";
+        ctx.font = "22px 'Noto Serif SC', 'Songti SC', serif";
+        const favorable = (current.criticalYears?.favorable || []).slice(0, 3);
+        const risky = (current.criticalYears?.risky || []).slice(0, 3);
+        let finalY = nextY + 78;
+        favorable.forEach((item) => {
+            finalY += drawWrappedText(ctx, `↑ ${item.year}年 ${item.pillar}：${item.reason}`, 72, finalY, 1090, 32) + 6;
+        });
+        risky.forEach((item) => {
+            finalY += drawWrappedText(ctx, `! ${item.year}年 ${item.pillar}：${item.reason}`, 72, finalY, 1090, 32) + 6;
+        });
+
+        ctx.fillStyle = "#6b7280";
+        ctx.font = "18px 'Noto Serif SC', 'Songti SC', serif";
+        ctx.fillText("命理分析仅作参考，请结合现实选择与专业意见。", 72, canvas.height - 48);
+
+        const link = document.createElement("a");
+        link.href = canvas.toDataURL("image/png");
+        link.download = `${(current.input.profileName || "bazi-poster").replace(/\s+/g, "-")}-poster.png`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
     }
 
     function exportMarkdownReport() {
@@ -2059,7 +2459,9 @@
 
     initSelects();
     bindEvents();
+    setInputStep(1);
     renderSavedProfiles();
+    renderLifeEvents();
     renderKnowledgeBase([]);
     renderCaseSimilarity([]);
     updatePreview(PROFILE_CONFIGS.primary);

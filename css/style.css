@@ -287,6 +287,36 @@ textarea {
     flex-wrap: wrap;
 }
 
+.stepper {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.step-chip {
+    border: 1px solid rgba(89, 58, 28, 0.18);
+    background: rgba(255, 255, 255, 0.66);
+    color: var(--muted);
+    border-radius: 999px;
+    padding: 8px 14px;
+    cursor: pointer;
+}
+
+.step-chip.active {
+    color: var(--brand);
+    border-color: rgba(154, 52, 18, 0.38);
+    background: rgba(154, 52, 18, 0.12);
+}
+
+.step-panel {
+    display: none;
+}
+
+.step-panel.active {
+    display: block;
+}
+
 .btn {
     border: 0;
     border-radius: 999px;
@@ -588,6 +618,103 @@ textarea {
     padding-left: 18px;
 }
 
+.mini-bazi-shell {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.mini-bazi-pillars {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.mini-pillar {
+    border: 1px solid rgba(89, 58, 28, 0.14);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.7);
+    padding: 8px;
+    text-align: center;
+}
+
+.mini-pillar-label {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-bottom: 4px;
+}
+
+.mini-pillar-main {
+    font-size: 1.25rem;
+    color: var(--text);
+}
+
+.mini-pillar-meta {
+    font-size: 0.75rem;
+    color: var(--muted);
+}
+
+.compact-preview {
+    font-size: 0.9rem;
+}
+
+.daily-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.calendar-day {
+    border: 1px solid rgba(89, 58, 28, 0.16);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.72);
+    padding: 8px 6px;
+    min-height: 78px;
+    cursor: pointer;
+    display: grid;
+    gap: 4px;
+}
+
+.calendar-day .date {
+    font-weight: 700;
+}
+
+.calendar-day .lvl {
+    font-size: 0.78rem;
+}
+
+.calendar-day.lv-good {
+    border-color: rgba(63, 98, 18, 0.4);
+    background: rgba(63, 98, 18, 0.1);
+}
+
+.calendar-day.lv-mid {
+    border-color: rgba(180, 83, 9, 0.32);
+    background: rgba(180, 83, 9, 0.08);
+}
+
+.calendar-day.lv-bad {
+    border-color: rgba(153, 27, 27, 0.4);
+    background: rgba(153, 27, 27, 0.1);
+}
+
+.calendar-day.active {
+    box-shadow: inset 0 0 0 2px rgba(22, 78, 99, 0.38);
+}
+
+#section-ai-analysis .pair-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+}
+
+#section-ai-analysis .report-block {
+    border: 0;
+    background: rgba(255, 255, 255, 0.82);
+    border-radius: 14px;
+    padding: 16px 18px;
+}
+
 .modal.hidden {
     display: none;
 }
@@ -628,6 +755,10 @@ textarea {
     .pillars-container {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+
+    .daily-calendar-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
 }
 
 @media (max-width: 640px) {
@@ -641,5 +772,17 @@ textarea {
 
     .branch-board {
         grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .mini-bazi-pillars {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .daily-calendar-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .calendar-day {
+        min-height: 66px;
     }
 }
