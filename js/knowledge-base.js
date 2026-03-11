@@ -1,6 +1,7 @@
 (function () {
     const STORAGE_KEY = "tming-knowledge-base-v1";
     const MAX_ENTRIES = 1200;
+    const PDFJS_VERSION = "4.4.168";
     const TEN_GOD_TERMS = ["比肩", "劫财", "食神", "伤官", "偏财", "正财", "七杀", "正官", "偏印", "正印"];
     const BRANCHES = "子丑寅卯辰巳午未申酉戌亥";
     const SEED_ENTRIES = [
@@ -355,10 +356,20 @@
 
     async function parsePdfToChunks(file) {
         try {
-            const pdfjs = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs");
+            const pdfjs = await import(`https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.min.mjs`);
+            if (pdfjs?.GlobalWorkerOptions) {
+                pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.mjs`;
+            }
             const bytes = new Uint8Array(await file.arrayBuffer());
-            const task = pdfjs.getDocument({ data: bytes, disableWorker: true });
-            const doc = await task.promise;
+            let doc = null;
+            try {
+                const workerTask = pdfjs.getDocument({ data: bytes });
+                doc = await workerTask.promise;
+            } catch (workerError) {
+                // 某些浏览器或本地环境会拦截 module worker，回退到主线程解析避免导入失败。
+                const fallbackTask = pdfjs.getDocument({ data: bytes, disableWorker: true });
+                doc = await fallbackTask.promise;
+            }
             const pages = [];
             for (let i = 1; i <= doc.numPages; i++) {
                 const page = await doc.getPage(i);

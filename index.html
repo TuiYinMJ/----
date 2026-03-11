@@ -559,10 +559,14 @@
 
                 <div class="card">
                     <h2>合盘 / 合婚总览</h2>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary" id="btn-compat-llm">生成合盘 AI 深度报告</button>
+                    </div>
                     <div class="chart-scroll">
                         <canvas id="compatibility-chart" width="1200" height="320"></canvas>
                     </div>
                     <div id="compatibility-analysis" class="pair-grid"></div>
+                    <div id="compatibility-llm-report"></div>
                 </div>
                 <div class="card">
                     <h2>双人运势同框趋势</h2>
@@ -679,6 +683,34 @@
                 </div>
                 <div class="card">
                     <h2>AI综合命理分析报告</h2>
+                    <div class="report-block">
+                        <h3>局部按需 AI 深度解读</h3>
+                        <p class="muted">点击某一模块单独分析，减少模板化复述和 Token 浪费。</p>
+                        <div class="form-actions module-ai-actions">
+                            <button type="button" class="btn btn-secondary" data-module-ai="year">当前流年</button>
+                            <button type="button" class="btn btn-secondary" data-module-ai="month">当前流月</button>
+                            <button type="button" class="btn btn-secondary" data-module-ai="career">事业</button>
+                            <button type="button" class="btn btn-secondary" data-module-ai="wealth">财运</button>
+                            <button type="button" class="btn btn-secondary" data-module-ai="relation">感情</button>
+                            <button type="button" class="btn btn-secondary" data-module-ai="health">健康</button>
+                        </div>
+                        <div class="pair-grid">
+                            <div class="form-group">
+                                <label for="module-ai-pillar">单柱深挖</label>
+                                <select id="module-ai-pillar">
+                                    <option value="日柱" selected>日柱</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>&nbsp;</label>
+                                <div class="form-actions">
+                                    <button type="button" class="btn btn-secondary" id="btn-module-ai-pillar">解读该柱</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="module-ai-status" class="preview-panel"></div>
+                        <div id="module-ai-report"></div>
+                    </div>
                     <div class="form-actions">
                         <button type="button" class="btn btn-secondary" id="btn-export-markdown">导出 Markdown 报告</button>
                         <button type="button" class="btn btn-secondary" id="btn-export-html">导出 HTML 报告</button>
@@ -800,6 +832,23 @@
         <button type="button" class="btn btn-secondary" id="btn-scroll-top">返回顶部</button>
         <button type="button" class="btn btn-secondary" id="btn-float-export">导出报告</button>
         <button type="button" class="btn btn-secondary" id="btn-float-print">打印</button>
+    </div>
+
+    <div class="fortune-chat" id="fortune-chat">
+        <button type="button" class="btn btn-primary fortune-chat-toggle" id="btn-fortune-chat-toggle">悬浮命理师</button>
+        <div class="fortune-chat-panel" id="fortune-chat-panel">
+            <div class="fortune-chat-head">
+                <h3>命理追问</h3>
+                <button type="button" class="btn-link" id="btn-fortune-chat-close">收起</button>
+            </div>
+            <div class="fortune-chat-log" id="fortune-chat-log"></div>
+            <form id="fortune-chat-form" class="fortune-chat-form">
+                <textarea id="fortune-chat-input" rows="3" placeholder="例如：我明年和朋友合伙开店，风险点在哪？"></textarea>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary" id="btn-fortune-chat-send">发送</button>
+                </div>
+            </form>
+        </div>
     </div>
 
     <template id="tpl-calendar-day">

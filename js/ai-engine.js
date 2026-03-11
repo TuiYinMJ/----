@@ -43,6 +43,16 @@
             "输出必须包含：总断、证据链、关键年份、行动策略、底线预警。"
         ].join("\n")
     };
+    const MODULE_INSTRUCTIONS = {
+        year: "你现在只分析“当前流年”这一层，必须先给结论，再给证据链（岁运/宫位/十神/神煞/动态触发）。",
+        month: "你现在只分析“当前流月”这一层，重点指出当月最该抓的机会和最该防的风险。",
+        career: "你现在只分析“事业与执行”模块，必须落地到岗位、协作、管理、转岗与节奏管理。",
+        wealth: "你现在只分析“财务与资源”模块，明确哪些行为更容易进账，哪些行为最容易破财。",
+        relation: "你现在只分析“感情与关系”模块，重点判断夫妻宫/关系宫位引动与现实沟通风险。",
+        health: "你现在只分析“健康与身心负荷”模块，按风险强弱给出优先级和可执行建议。",
+        pillars: "你现在只分析“单柱”模块，讲清该柱在时间轴与宫位上的含义，不要泛化到整盘模板。",
+        compatibility: "你现在只分析“双人合盘”模块，必须分别说明互补、冲突、共同低谷年份和缓冲策略。"
+    };
 
     function joinList(list) {
         return list && list.length ? list.join("；") : "暂无明显特别项。";
@@ -180,28 +190,20 @@
                 family: roundScore(evaluation.scores?.family),
                 health: roundScore(evaluation.scores?.health)
             },
-            gods: (evaluation.gods || []).slice(0, 4),
+            gods: (evaluation.gods || []).slice(0, 3),
             diShi: evaluation.diShi || "",
-            palaceTriggers: (evaluation.palaceTriggers || []).slice(0, 3).map((item) => ({
+            opportunities: (evaluation.opportunities || []).slice(0, 3),
+            risks: (evaluation.risks || []).slice(0, 3),
+            palaceTriggers: (evaluation.palaceTriggers || []).slice(0, 2).map((item) => ({
                 palace: item.palace,
                 relationType: item.relationType,
                 severity: item.severity || 0
             })),
-            alerts: (evaluation.specialAlerts || []).slice(0, 4).map((item) => ({
+            alerts: (evaluation.specialAlerts || []).slice(0, 3).map((item) => ({
                 type: item.type,
                 level: item.level,
                 severity: item.severity || 0
             })),
-            timing: {
-                hit: (evaluation.timing?.hit || []).slice(0, 2).map((item) => ({
-                    key: item.key,
-                    focus: item.focus
-                })),
-                release: (evaluation.timing?.release || []).slice(0, 2).map((item) => ({
-                    key: item.key,
-                    focus: item.focus
-                }))
-            },
             dynamicEco: {
                 majorShift: Boolean(evaluation.dynamicEco?.majorShift),
                 dominantElement: evaluation.dynamicEco?.dominantElement || "",
@@ -222,7 +224,7 @@
         const riskYears = [...years]
             .filter((item) => item.scores.overall <= 64 || item.riskCount > 0 || item.palaceRisk || item.scores.health <= 58)
             .sort((a, b) => (b.riskCount * 8 + (100 - b.scores.overall)) - (a.riskCount * 8 + (100 - a.scores.overall)))
-            .slice(0, 6)
+            .slice(0, 3)
             .sort((a, b) => a.year - b.year)
             .map((item) => ({
                 year: item.year,
@@ -235,7 +237,7 @@
         const chanceYears = [...years]
             .filter((item) => item.scores.overall >= 70 || item.chanceCount > 0)
             .sort((a, b) => (b.chanceCount * 7 + b.scores.overall) - (a.chanceCount * 7 + a.scores.overall))
-            .slice(0, 6)
+            .slice(0, 3)
             .sort((a, b) => a.year - b.year)
             .map((item) => ({
                 year: item.year,
@@ -254,7 +256,7 @@
         const riskMonths = [...months]
             .filter((item) => item.scores.overall <= 62 || item.riskCount > 0 || item.scores.health <= 56)
             .sort((a, b) => (b.riskCount * 8 + (100 - b.scores.overall)) - (a.riskCount * 8 + (100 - a.scores.overall)))
-            .slice(0, 3)
+            .slice(0, 2)
             .map((item) => ({
                 month: item.month,
                 pillar: item.pillar,
@@ -265,7 +267,7 @@
         const chanceMonths = [...months]
             .filter((item) => item.scores.overall >= 72)
             .sort((a, b) => b.scores.overall - a.scores.overall)
-            .slice(0, 3)
+            .slice(0, 2)
             .map((item) => ({
                 month: item.month,
                 pillar: item.pillar,
@@ -277,14 +279,14 @@
     }
 
     function buildReferencePayload(references = []) {
-        return (references || []).slice(0, 5).map((entry) => ({
+        return (references || []).slice(0, 3).map((entry) => ({
             citationId: entry.citationId || null,
             citation: entry.citation || "",
             title: entry.title,
             tags: entry.tags,
             source: entry.source,
             locator: entry.locator || "",
-            excerpt: (entry.excerpt || entry.content || "").slice(0, 180)
+            excerpt: (entry.excerpt || entry.content || "").slice(0, 150)
         }));
     }
 
@@ -319,7 +321,7 @@
                     ? {
                         primaryStem: state.chart.structure.commanderInfo.primaryStem,
                         primaryGod: state.chart.structure.commanderInfo.primaryGod,
-                        weights: state.chart.structure.commanderInfo.weights
+                        weights: (state.chart.structure.commanderInfo.weights || []).slice(0, 2)
                     }
                     : null
             },
@@ -343,25 +345,26 @@
             currentMonth: monthEval,
             extremes,
             health: {
-                risks: (state.health?.risks || []).slice(0, 4).map((item) => ({
+                risks: (state.health?.risks || []).slice(0, 2).map((item) => ({
                     element: item.element,
                     score: item.score,
                     risk: item.risk
                 })),
-                suggestions: (state.health?.suggestions || []).slice(0, 4)
+                suggestions: (state.health?.suggestions || []).slice(0, 2)
             },
             compatibility: state.compatibility?.result
                 ? {
                     scores: state.compatibility.result.scores,
-                    mode: state.compatibility.input?.mode || ""
+                    mode: state.compatibility.input?.mode || "",
+                    summary: state.compatibility.result.summary || ""
                 }
                 : null,
-            lifeEvents: (state.lifeEvents || []).slice(0, 10).map((item) => ({
+            lifeEvents: (state.lifeEvents || []).slice(0, 6).map((item) => ({
                 year: item.year,
                 type: item.type,
                 note: String(item.note || "").slice(0, 120)
             })),
-            feedbackHistory: (state.feedbackHistory || []).slice(-12).map((item) => ({
+            feedbackHistory: (state.feedbackHistory || []).slice(-6).map((item) => ({
                 scope: item.scope,
                 verdict: item.verdict,
                 year: item.year || null,
@@ -371,6 +374,114 @@
                 summary: String(item.summary || item.note || "").slice(0, 120)
             })),
             references: buildReferencePayload(references)
+        };
+    }
+
+    function buildModulePayload(state, references, moduleKey, options = {}) {
+        const core = buildCorePayload(state, references);
+        const compatibility = state.compatibility?.result || null;
+        const yearRows = (state.allYearEvaluations || []).map((item) => ({
+            year: item.year,
+            pillar: item.pillar,
+            scores: item.evaluation?.scores || {}
+        }));
+        const pickTopYears = (scoreKey, order = "desc", limit = 3) => {
+            const sorted = [...yearRows].sort((a, b) => {
+                const delta = Number(a.scores?.[scoreKey] || 0) - Number(b.scores?.[scoreKey] || 0);
+                return order === "desc" ? -delta : delta;
+            });
+            return sorted.slice(0, limit).sort((a, b) => a.year - b.year).map((item) => ({
+                year: item.year,
+                pillar: item.pillar,
+                score: roundScore(item.scores?.[scoreKey] || 0),
+                overall: roundScore(item.scores?.overall || 0)
+            }));
+        };
+        const base = {
+            profileName: core.profileName,
+            basic: core.basic,
+            structure: core.structure,
+            dayun: core.dayun,
+            dynamicFacts: core.dynamicFacts,
+            references: core.references
+        };
+        if (moduleKey === "compatibility") {
+            const trend = state.compatibility?.pairedTrend || [];
+            const trendRows = trend.map((item) => ({
+                year: item.year,
+                primary: roundScore(item.primary),
+                compat: roundScore(item.compat),
+                avg: roundScore((Number(item.primary || 0) + Number(item.compat || 0)) / 2)
+            }));
+            return {
+                ...base,
+                focus: { module: "compatibility", moduleLabel: "合盘/合婚" },
+                compatibility: compatibility
+                    ? {
+                        summary: compatibility.summary,
+                        scores: compatibility.scores,
+                        sections: (compatibility.sections || []).slice(0, 4).map((item) => ({
+                            title: item.title,
+                            verdict: item.verdict,
+                            positives: (item.positives || []).slice(0, 2),
+                            negatives: (item.negatives || []).slice(0, 2)
+                        }))
+                    }
+                    : null,
+                pairedTrend: {
+                    highs: [...trendRows].sort((a, b) => b.avg - a.avg).slice(0, 3).sort((a, b) => a.year - b.year),
+                    lows: [...trendRows].sort((a, b) => a.avg - b.avg).slice(0, 3).sort((a, b) => a.year - b.year)
+                }
+            };
+        }
+        if (moduleKey === "pillars") {
+            const focusLabel = options?.pillarLabel || "日柱";
+            const focusPillar = (state.chart?.pillars || []).find((pillar) => pillar.label === focusLabel) || state.chart?.pillars?.[2];
+            return {
+                ...base,
+                focus: {
+                    module: "pillars",
+                    moduleLabel: `${focusLabel}深度解读`,
+                    pillar: focusPillar
+                        ? {
+                            label: focusPillar.label,
+                            stem: focusPillar.stem,
+                            branch: focusPillar.branch,
+                            tenGod: focusPillar.tenGod,
+                            tenGodZhi: focusPillar.tenGodZhi,
+                            hidden: focusPillar.hidden,
+                            diShi: focusPillar.diShi,
+                            nayin: focusPillar.nayin
+                        }
+                        : null
+                },
+                currentYear: core.currentYear,
+                currentMonth: core.currentMonth,
+                extremes: core.extremes
+            };
+        }
+        const moduleMap = {
+            year: { label: "当前流年", scoreKey: "overall" },
+            month: { label: "当前流月", scoreKey: "overall" },
+            career: { label: "事业", scoreKey: "career" },
+            wealth: { label: "财运", scoreKey: "wealth" },
+            relation: { label: "感情关系", scoreKey: "relation" },
+            health: { label: "健康", scoreKey: "health" }
+        };
+        const mapping = moduleMap[moduleKey] || moduleMap.year;
+        return {
+            ...base,
+            focus: { module: moduleKey, moduleLabel: mapping.label },
+            currentYear: core.currentYear,
+            currentMonth: core.currentMonth,
+            domainExtremes: {
+                highs: pickTopYears(mapping.scoreKey, "desc", 3),
+                lows: pickTopYears(mapping.scoreKey, "asc", 3)
+            },
+            extremes: core.extremes,
+            health: core.health,
+            lifeEvents: core.lifeEvents,
+            feedbackHistory: core.feedbackHistory
         };
     }
 
@@ -398,6 +509,78 @@
         ];
     }
 
+    function buildModulePromptMessages(state, promptTemplate, references, moduleKey, options = {}) {
+        const payload = buildModulePayload(state, references, moduleKey, options);
+        const instruction = MODULE_INSTRUCTIONS[moduleKey] || MODULE_INSTRUCTIONS.year;
+        const userPrompt = [
+            `请只针对模块「${payload.focus?.moduleLabel || moduleKey}」输出分析，不要把整盘所有内容重复一遍。`,
+            "输出格式固定：结论、证据链、今年到明年的重点行动、一句底线提醒。",
+            "如果 references 有可用条目，最多引用 2 条，且必须用 [引用n] 标注 citationId。",
+            "禁止模板化套话，避免“以稳为主”这类空泛表达。",
+            `模块数据：\n${JSON.stringify(payload, null, 2)}`
+        ].join("\n\n");
+        return [
+            { role: "system", content: `${promptTemplate || DEFAULT_PROMPT_TEMPLATE}\n\n${instruction}` },
+            { role: "user", content: userPrompt }
+        ];
+    }
+
+    function buildCompatibilityPromptMessages(state, promptTemplate, references) {
+        const payload = buildModulePayload(state, references, "compatibility", {});
+        return [
+            { role: "system", content: `${promptTemplate || DEFAULT_PROMPT_TEMPLATE}\n\n${MODULE_INSTRUCTIONS.compatibility}` },
+            {
+                role: "user",
+                content: [
+                    "请输出“合盘专项报告”，只围绕两人互动。",
+                    "必须包含：互补点、冲突点、共同低谷年份、共同高光年份、关系维护策略、商业协作建议（若有）。",
+                    "禁止泛泛而谈，所有结论必须对应 payload 中的字段。",
+                    "如果 references 有内容，最多引用 2 条并标注 [引用n]。",
+                    `合盘数据：\n${JSON.stringify(payload, null, 2)}`
+                ].join("\n\n")
+            }
+        ];
+    }
+
+    function buildChatPromptMessages(state, promptTemplate, references, history = [], question = "") {
+        const core = buildCorePayload(state, references);
+        const context = {
+            profileName: core.profileName,
+            basic: core.basic,
+            pillars: core.pillars,
+            structure: core.structure,
+            dayun: core.dayun,
+            currentYear: core.currentYear,
+            currentMonth: core.currentMonth,
+            extremes: core.extremes,
+            compatibility: core.compatibility,
+            lifeEvents: core.lifeEvents,
+            feedbackHistory: core.feedbackHistory,
+            references: core.references
+        };
+        const normalizedHistory = (history || [])
+            .filter((item) => item && (item.role === "user" || item.role === "assistant") && String(item.content || "").trim())
+            .slice(-8)
+            .map((item) => ({
+                role: item.role,
+                content: String(item.content || "").slice(0, 800)
+            }));
+        return [
+            {
+                role: "system",
+                content: [
+                    promptTemplate || DEFAULT_PROMPT_TEMPLATE,
+                    "你现在处于“悬浮命理师”问答模式：回答要短、准、可执行，不要复述长篇报告。",
+                    "如果用户问的是某个年份/月份/合作/合婚等具体问题，请直接给“可做/慎做/不做”的建议和理由。",
+                    "引用 references 时，必须用 [引用n]。",
+                    `常驻命盘上下文：\n${JSON.stringify(context, null, 2)}`
+                ].join("\n\n")
+            },
+            ...normalizedHistory,
+            { role: "user", content: String(question || "").trim().slice(0, 1200) }
+        ];
+    }
+
     window.AIEngine = {
         DEFAULT_PROMPT_TEMPLATE,
         MULTI_AGENT_SEQUENCE,
@@ -405,6 +588,9 @@
         buildLuckySuggestions,
         buildPromptMessages,
         buildAgentPromptMessages,
+        buildModulePromptMessages,
+        buildCompatibilityPromptMessages,
+        buildChatPromptMessages,
         buildKnowledgeQueryText
     };
 })();

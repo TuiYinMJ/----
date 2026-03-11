@@ -102,6 +102,11 @@
             compatProfilesCache: [],
             feedbackCache: []
         },
+        chat: {
+            open: false,
+            history: [],
+            running: false
+        },
         workers: {
             analysis: null,
             vector: null,
@@ -647,6 +652,47 @@
         $("llm-status").innerHTML = `<p>${safe}</p>`;
     }
 
+    function renderModuleAiStatus(message) {
+        const node = $("module-ai-status");
+        if (!node) return;
+        const safe = escapeHtml(String(message || "")).replace(/\n/g, "<br>");
+        node.innerHTML = `<p>${safe}</p>`;
+    }
+
+    function renderModuleAiReport(content, title = "模块 AI 深度解读") {
+        const node = $("module-ai-report");
+        if (!node) return;
+        if (!content) {
+            node.innerHTML = "";
+            return;
+        }
+        node.innerHTML = `<div class="report-block"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(String(content)).replace(/\n/g, "<br>")}</p></div>`;
+    }
+
+    function renderCompatLlmReport(content, title = "合盘 AI 深度报告") {
+        const node = $("compatibility-llm-report");
+        if (!node) return;
+        if (!content) {
+            node.innerHTML = "";
+            return;
+        }
+        node.innerHTML = `<div class="report-block"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(String(content)).replace(/\n/g, "<br>")}</p></div>`;
+    }
+
+    function updateModulePillarOptions(chart) {
+        const select = $("module-ai-pillar");
+        if (!select || !chart?.pillars?.length) return;
+        const previous = select.value;
+        select.innerHTML = chart.pillars.map((pillar) => (
+            `<option value="${escapeHtml(pillar.label)}">${escapeHtml(`${pillar.label}：${pillar.stem}${pillar.branch}`)}</option>`
+        )).join("");
+        if (previous && Array.from(select.options).some((option) => option.value === previous)) {
+            select.value = previous;
+        } else {
+            select.value = "日柱";
+        }
+    }
+
     function renderGeoConfig(config) {
         $("geo-provider").value = config.provider || "none";
         $("geo-api-key").value = config.apiKey || "";
@@ -732,6 +778,14 @@
         $("btn-float-print").addEventListener("click", printReport);
         $("btn-llm-models").addEventListener("click", refreshLlmModels);
         $("btn-llm-generate").addEventListener("click", generateLlmReport);
+        $("btn-compat-llm")?.addEventListener("click", generateCompatibilityLlmReport);
+        document.querySelectorAll("[data-module-ai]").forEach((button) => {
+            button.addEventListener("click", () => generateModuleAiReport(button.dataset.moduleAi || "year"));
+        });
+        $("btn-module-ai-pillar")?.addEventListener("click", () => {
+            const focusLabel = $("module-ai-pillar")?.value || "日柱";
+            generateModuleAiReport("pillars", { pillarLabel: focusLabel });
+        });
         $("btn-kb-reindex").addEventListener("click", rebuildKnowledgeVectors);
         $("btn-kb-reindex-inline").addEventListener("click", rebuildKnowledgeVectors);
         $("btn-kb-export").addEventListener("click", exportKnowledgeBase);
@@ -744,6 +798,15 @@
         $("btn-close-settings").addEventListener("click", closeSettingsModal);
         $("btn-life-event-add").addEventListener("click", addLifeEventFromForm);
         $("btn-reverse-search").addEventListener("click", runReverseLookup);
+        $("btn-fortune-chat-toggle")?.addEventListener("click", () => {
+            setFortuneChatOpen(!state.chat.open);
+            renderFortuneChatLog();
+        });
+        $("btn-fortune-chat-close")?.addEventListener("click", () => setFortuneChatOpen(false));
+        $("fortune-chat-form")?.addEventListener("submit", (event) => {
+            event.preventDefault();
+            submitFortuneChat();
+        });
         $("daily-calendar-year").addEventListener("change", () => { renderDailyCalendar(); });
         $("daily-calendar-month").addEventListener("change", () => { renderDailyCalendar(); });
         $("daily-calendar-grid").addEventListener("click", (event) => {
@@ -1434,7 +1497,10 @@
             ragMatches: [],
             ragReferences: [],
             llmReport: "",
-            agentReports: {}
+            agentReports: {},
+            moduleAiReports: {},
+            compatibilityLlmReport: "",
+            lastModuleAiKey: ""
         };
     }
 
@@ -1523,6 +1589,8 @@
             report,
             lucky
         });
+        state.chat.history = [];
+        renderFortuneChatLog();
         showSection("bazi");
     }
 
@@ -1542,6 +1610,8 @@
                 nowMonth: new Date().getMonth() + 1
             });
             state.current = mergeAnalysisState(analysisData);
+            state.chat.history = [];
+            renderFortuneChatLog();
             showSection("bazi");
         } catch (error) {
             console.warn("[analysis-worker-fallback]", error);
@@ -1564,9 +1634,16 @@
         renderNarratives(chart);
         renderUsefulAnalysis(chart);
         renderShenshaDetails(chart);
+        updateModulePillarOptions(chart);
         renderDayun(dayun, yearEvaluations, monthEvaluations, allYearEvaluations, eventDashboard, criticalYears, dailyGuide);
         renderHealth(health, yearEvaluations, monthEvaluations);
         renderAI(report, environment, lucky, modern, detailed, family, master, currentYearEval, currentMonthEval, compatibility, kbMatches, caseMatches);
+        renderCompatLlmReport(state.current.compatibilityLlmReport || "", "合盘 AI 深度报告");
+        const cachedModule = state.current.lastModuleAiKey && state.current.moduleAiReports
+            ? state.current.moduleAiReports[state.current.lastModuleAiKey]
+            : null;
+        renderModuleAiReport(cachedModule?.content || "", cachedModule?.title || "模块 AI 深度解读");
+        renderModuleAiStatus(cachedModule ? "已展示最近一次模块深度解读。" : "可点击上方按钮进行单模块深度解读。");
         renderDailyCalendar();
     }
 
@@ -2531,7 +2608,7 @@
         if (state.current) {
             state.current.kbMatches = keywordMatches;
             state.current.caseMatches = caseMatches;
-            state.current.ragReferences = KnowledgeBaseEngine.buildCitedReferences(merged, 6);
+            state.current.ragReferences = KnowledgeBaseEngine.buildCitedReferences(merged, 4);
         }
         renderKnowledgeBase(merged);
         renderCaseSimilarity(caseMatches);
@@ -2746,14 +2823,14 @@
             queryEmbedding = await LLMClient.embed(config, config.embeddingModel, queryText);
             if (state.workers.vector) {
                 try {
-                    ragMatches = await semanticMatchWithWorker(queryEmbedding, allEntries, 6);
+                    ragMatches = await semanticMatchWithWorker(queryEmbedding, allEntries, 4);
                 } catch (error) {
                     console.warn("[vector-worker-fallback]", error);
-                    ragMatches = KnowledgeBaseEngine.semanticMatchEntries(queryEmbedding, 6);
+                    ragMatches = KnowledgeBaseEngine.semanticMatchEntries(queryEmbedding, 4);
                     state.workers.vectorIndexStamp = "";
                 }
             } else {
-                ragMatches = KnowledgeBaseEngine.semanticMatchEntries(queryEmbedding, 6);
+                ragMatches = KnowledgeBaseEngine.semanticMatchEntries(queryEmbedding, 4);
             }
         }
         const caseMatches = KnowledgeBaseEngine.matchCaseEntries(
@@ -2768,7 +2845,7 @@
         state.current.caseMatches = caseMatches;
         const merged = mergeKnowledgeMatches(keywordMatches, ragMatches);
         state.current.kbMatches = keywordMatches;
-        state.current.ragReferences = KnowledgeBaseEngine.buildCitedReferences(merged, 6);
+        state.current.ragReferences = KnowledgeBaseEngine.buildCitedReferences(merged, 4);
         renderKnowledgeBase(merged);
         renderCaseSimilarity(caseMatches);
         return state.current.ragReferences;
@@ -2801,6 +2878,168 @@
         const content = await LLMClient.chat(config, model, messages, options);
         if (onUpdate) onUpdate(content);
         return content;
+    }
+
+    function ensureLlmReady(config, { forCompatibility = false } = {}) {
+        const current = ensureReportState();
+        if (!current) return null;
+        if (forCompatibility && !current.compatibility) {
+            renderLlmStatus("当前没有合盘数据，请先启用合盘并完成一次测算。");
+            return null;
+        }
+        if (!config || config.provider === "none") {
+            renderLlmStatus("当前未启用 LLM 接口，请在“AI综合分析”中选择接口类型并配置模型。");
+            return null;
+        }
+        if (!config.model) {
+            renderLlmStatus("请先获取并选择分析模型。");
+            return null;
+        }
+        return current;
+    }
+
+    async function ensureRagReferencesForLlm(config) {
+        if (!state.current) return [];
+        const cached = Array.isArray(state.current.ragReferences) ? state.current.ragReferences : [];
+        if (cached.length) return cached;
+        return getRagReferences(config);
+    }
+
+    async function generateModuleAiReport(moduleKey, options = {}) {
+        const config = saveAiConfig(getAiConfigFromForm());
+        const current = ensureLlmReady(config, {});
+        if (!current) return;
+        try {
+            renderModuleAiStatus(`正在生成「${moduleKey}」深度解读...`);
+            const references = await ensureRagReferencesForLlm(config);
+            const messages = AIEngine.buildModulePromptMessages(current, config.promptTemplate, references, moduleKey, options);
+            const titleMap = {
+                year: "当前流年",
+                month: "当前流月",
+                career: "事业",
+                wealth: "财运",
+                relation: "感情",
+                health: "健康",
+                pillars: options?.pillarLabel ? `${options.pillarLabel}深挖` : "单柱深挖"
+            };
+            const title = moduleKey === "pillars"
+                ? `${options?.pillarLabel || "日柱"} AI 深度解读`
+                : `模块 AI 深度解读 · ${titleMap[moduleKey] || moduleKey}`;
+            const content = await requestLlmContent(
+                config,
+                config.model,
+                messages,
+                { temperature: 0.72 },
+                (partial) => renderModuleAiReport(partial, title)
+            );
+            renderModuleAiReport(content, title);
+            if (state.current) {
+                const key = moduleKey === "pillars" ? `pillars:${options?.pillarLabel || "日柱"}` : moduleKey;
+                state.current.moduleAiReports = state.current.moduleAiReports || {};
+                state.current.moduleAiReports[key] = { title, content };
+                state.current.lastModuleAiKey = key;
+            }
+            renderModuleAiStatus("模块解读完成。");
+            showSection("ai-analysis");
+        } catch (error) {
+            renderModuleAiStatus(`模块解读失败：${error.message}`);
+        }
+    }
+
+    async function generateCompatibilityLlmReport() {
+        const config = saveAiConfig(getAiConfigFromForm());
+        const current = ensureLlmReady(config, { forCompatibility: true });
+        if (!current) return;
+        try {
+            renderLlmStatus("正在生成合盘 AI 深度报告...");
+            renderCompatLlmReport("正在生成中，请稍候...", "合盘 AI 深度报告");
+            const references = await ensureRagReferencesForLlm(config);
+            const messages = AIEngine.buildCompatibilityPromptMessages(current, config.promptTemplate, references);
+            const content = await requestLlmContent(
+                config,
+                config.model,
+                messages,
+                { temperature: 0.75 },
+                (partial) => renderCompatLlmReport(partial, "合盘 AI 深度报告")
+            );
+            state.current.compatibilityLlmReport = content;
+            renderCompatLlmReport(content, "合盘 AI 深度报告");
+            renderLlmStatus("合盘 AI 深度报告生成完成。");
+            showSection("compat");
+        } catch (error) {
+            renderCompatLlmReport("", "合盘 AI 深度报告");
+            renderLlmStatus(`合盘 AI 报告生成失败：${error.message}`);
+        }
+    }
+
+    function setFortuneChatOpen(open) {
+        state.chat.open = Boolean(open);
+        const wrap = $("fortune-chat");
+        if (!wrap) return;
+        wrap.classList.toggle("is-open", state.chat.open);
+    }
+
+    function renderFortuneChatLog() {
+        const log = $("fortune-chat-log");
+        if (!log) return;
+        const rows = state.chat.history || [];
+        if (!rows.length) {
+            log.innerHTML = `<div class="fortune-chat-item role-assistant"><p>先完成一次测算，然后可以直接追问：某年换工作、合伙、结婚、搬家等是否合适。</p></div>`;
+            return;
+        }
+        log.innerHTML = rows.map((item) => `
+            <div class="fortune-chat-item role-${escapeHtml(item.role)}">
+                <p>${escapeHtml(String(item.content || "")).replace(/\n/g, "<br>")}</p>
+            </div>
+        `).join("");
+        log.scrollTop = log.scrollHeight;
+    }
+
+    async function submitFortuneChat() {
+        const input = $("fortune-chat-input");
+        if (!input) return;
+        const question = String(input.value || "").trim();
+        if (!question || state.chat.running) return;
+        const config = saveAiConfig(getAiConfigFromForm());
+        const current = ensureLlmReady(config, {});
+        if (!current) return;
+        state.chat.running = true;
+        state.chat.history.push({ role: "user", content: question });
+        state.chat.history = state.chat.history.slice(-24);
+        input.value = "";
+        renderFortuneChatLog();
+        try {
+            const references = await ensureRagReferencesForLlm(config);
+            const messages = AIEngine.buildChatPromptMessages(
+                current,
+                config.promptTemplate,
+                references,
+                state.chat.history.slice(0, -1),
+                question
+            );
+            const assistant = { role: "assistant", content: "" };
+            state.chat.history.push(assistant);
+            renderFortuneChatLog();
+            const content = await requestLlmContent(
+                config,
+                config.model,
+                messages,
+                { temperature: 0.72 },
+                (partial) => {
+                    assistant.content = partial;
+                    renderFortuneChatLog();
+                }
+            );
+            assistant.content = content;
+            state.chat.history = state.chat.history.slice(-24);
+            renderFortuneChatLog();
+        } catch (error) {
+            state.chat.history.push({ role: "assistant", content: `本次追问失败：${error.message}` });
+            state.chat.history = state.chat.history.slice(-24);
+            renderFortuneChatLog();
+        } finally {
+            state.chat.running = false;
+        }
     }
 
     async function generateLlmReport() {
@@ -2864,6 +3103,7 @@
         const trendCanvas = $("compatibility-trend-chart");
         if (!compatibility) {
             $("compatibility-analysis").innerHTML = `<div class="mini-card"><h3>未启用合盘</h3><p>打开“启用合盘 / 合婚分析”后，录入第二个人的出生信息，这里会显示合盘、合婚、家庭协同和子嗣协同结果。</p></div>`;
+            renderCompatLlmReport("", "合盘 AI 深度报告");
             ChartRenderer.drawBarChart($("compatibility-chart"), [
                 { element: "吸引", score: 0 },
                 { element: "沟通", score: 0 },
@@ -3886,6 +4126,9 @@
         renderKnowledgeBase([]);
         renderCaseSimilarity([]);
         renderFeedbackHistory();
+        renderModuleAiStatus("先完成一次测算，再使用模块级 AI 深度解读。");
+        renderFortuneChatLog();
+        setFortuneChatOpen(false);
         updatePreview(PROFILE_CONFIGS.primary);
         updatePreview(PROFILE_CONFIGS.compat);
     }
