@@ -1,5 +1,8 @@
 (function () {
     const STORAGE_KEY = "tming-knowledge-base-v1";
+    const MAX_ENTRIES = 1200;
+    const TEN_GOD_TERMS = ["比肩", "劫财", "食神", "伤官", "偏财", "正财", "七杀", "正官", "偏印", "正印"];
+    const BRANCHES = "子丑寅卯辰巳午未申酉戌亥";
     const SEED_ENTRIES = [
         {
             id: "seed-1",
@@ -42,19 +45,32 @@
         return SEED_ENTRIES.map((item) => ({ ...item }));
     }
 
+    function normalizeEntry(entry) {
+        return {
+            ...entry,
+            title: String(entry.title || "未命名条目"),
+            tags: Array.isArray(entry.tags) ? entry.tags.filter(Boolean) : [],
+            content: String(entry.content || ""),
+            source: String(entry.source || "手动添加"),
+            embedding: Array.isArray(entry.embedding) ? entry.embedding : null,
+            embeddingModel: String(entry.embeddingModel || "")
+        };
+    }
+
     function loadEntries() {
         try {
             const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-            if (!parsed || !Array.isArray(parsed) || !parsed.length) return cloneSeed();
-            return parsed;
+            if (!Array.isArray(parsed) || !parsed.length) return cloneSeed();
+            return parsed.map(normalizeEntry);
         } catch {
             return cloneSeed();
         }
     }
 
     function saveEntries(entries) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.slice(0, 80)));
-        return entries;
+        const normalized = entries.map(normalizeEntry).slice(0, MAX_ENTRIES);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+        return normalized;
     }
 
     function resetSeed() {
@@ -63,13 +79,10 @@
 
     function addEntry(entry) {
         const entries = loadEntries();
-        entries.unshift({
+        entries.unshift(normalizeEntry({
             id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            title: entry.title,
-            tags: entry.tags || [],
-            content: entry.content,
-            source: entry.source || "手动添加"
-        });
+            ...entry
+        }));
         return saveEntries(entries);
     }
 
@@ -77,52 +90,246 @@
         return saveEntries(loadEntries().filter((item) => item.id !== id));
     }
 
-    function importFiles(fileList) {
-        const files = Array.from(fileList || []);
-        return Promise.all(files.map((file) => new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-                const text = String(reader.result || "").slice(0, 40000);
-                if (file.name.endsWith(".json")) {
-                    try {
-                        const parsed = JSON.parse(text);
-                        if (Array.isArray(parsed)) {
-                            resolve(parsed.map((item, index) => ({
-                                title: item.title || `${file.name} #${index + 1}`,
-                                tags: item.tags || [],
-                                content: item.content || JSON.stringify(item),
-                                source: file.name
-                            })));
-                            return;
-                        }
-                    } catch {
-                        // fall through to plain text import
-                    }
-                }
-                resolve([{
-                    title: file.name,
-                    tags: [],
-                    content: text,
-                    source: file.name
-                }]);
+    function exportEntries() {
+        return JSON.stringify(loadEntries(), null, 2);
+    }
+
+    function setEntryEmbedding(id, embedding, embeddingModel) {
+        const entries = loadEntries().map((entry) => {
+            if (entry.id !== id) return entry;
+            return {
+                ...entry,
+                embedding,
+                embeddingModel,
+                embeddingUpdatedAt: Date.now()
             };
-            reader.onerror = reject;
-            reader.readAsText(file);
-        }))).then((groups) => {
-            let entries = loadEntries();
-            groups.flat().forEach((entry) => {
-                entries.unshift({
-                    id: `import-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                    ...entry
+        });
+        saveEntries(entries);
+        return entries;
+    }
+
+    function clearEmbeddings() {
+        return saveEntries(loadEntries().map((entry) => ({
+            ...entry,
+            embedding: null,
+            embeddingModel: "",
+            embeddingUpdatedAt: null
+        })));
+    }
+
+    function cosineSimilarity(a, b) {
+        if (!Array.isArray(a) || !Array.isArray(b) || !a.length || a.length !== b.length) return 0;
+        let dot = 0;
+        let normA = 0;
+        let normB = 0;
+        for (let i = 0; i < a.length; i++) {
+            dot += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
+        }
+        if (!normA || !normB) return 0;
+        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+
+    function stripHtml(html) {
+        const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+        return (doc.body?.textContent || "").replace(/\u00a0/g, " ");
+    }
+
+    function normalizeText(text) {
+        return String(text || "")
+            .replace(/\r/g, "\n")
+            .replace(/[ \t]+\n/g, "\n")
+            .replace(/\n{3,}/g, "\n\n")
+            .replace(/[ \t]{2,}/g, " ")
+            .trim();
+    }
+
+    function extractChunkTags(text) {
+        const tags = new Set();
+        const source = String(text || "");
+        const stemMonthRegex = new RegExp(`([甲乙丙丁戊己庚辛壬癸])(?:木|火|土|金|水)?生于([${BRANCHES}])月`, "g");
+        let match = stemMonthRegex.exec(source);
+        while (match) {
+            tags.add(`日主:${match[1]}`);
+            tags.add(`月令:${match[2]}`);
+            match = stemMonthRegex.exec(source);
+        }
+        TEN_GOD_TERMS.forEach((term) => {
+            if (source.includes(term)) tags.add(`十神:${term}`);
+        });
+        if (source.includes("用神")) tags.add("用神");
+        if (source.includes("调候")) tags.add("调候");
+        if (source.includes("合化")) tags.add("合化");
+        if (source.includes("伤官见官")) tags.add("伤官见官");
+        if (source.includes("杀印相生")) tags.add("杀印相生");
+        if (source.includes("食神生财")) tags.add("食神生财");
+        return Array.from(tags).slice(0, 10);
+    }
+
+    function splitLongText(value, maxLength = 1200) {
+        if (value.length <= maxLength) return [value];
+        const chunks = [];
+        let cursor = 0;
+        while (cursor < value.length) {
+            const end = Math.min(cursor + maxLength, value.length);
+            let splitAt = Math.max(
+                value.lastIndexOf("。", end),
+                value.lastIndexOf("！", end),
+                value.lastIndexOf("？", end),
+                value.lastIndexOf("\n", end)
+            );
+            if (splitAt <= cursor + 240) splitAt = end;
+            const chunk = value.slice(cursor, splitAt).trim();
+            if (chunk) chunks.push(chunk);
+            cursor = splitAt;
+        }
+        return chunks;
+    }
+
+    function splitSemanticChunks(text) {
+        const headingRegex = new RegExp(
+            `^(第[一二三四五六七八九十百0-9]+[章节回篇]|[一二三四五六七八九十]+[、.．]|#{1,3}\\s|[甲乙丙丁戊己庚辛壬癸](?:木|火|土|金|水)?生于[${BRANCHES}]月)`,
+            "i"
+        );
+        const lines = normalizeText(text).split("\n");
+        const chunks = [];
+        let currentTitle = "";
+        let buffer = [];
+        const flush = () => {
+            const body = buffer.join("\n").trim();
+            if (!body) return;
+            splitLongText(body).forEach((part, index) => {
+                chunks.push({
+                    title: currentTitle || (index === 0 ? "命理片段" : `命理片段续${index + 1}`),
+                    content: part
                 });
             });
-            saveEntries(entries);
-            return entries;
+        };
+        lines.forEach((line) => {
+            if (headingRegex.test(line.trim()) && buffer.length) {
+                flush();
+                currentTitle = line.trim();
+                buffer = [];
+                return;
+            }
+            if (headingRegex.test(line.trim())) {
+                currentTitle = line.trim();
+                return;
+            }
+            buffer.push(line);
+        });
+        flush();
+        if (!chunks.length) {
+            splitLongText(normalizeText(text)).forEach((part) => {
+                chunks.push({ title: "命理片段", content: part });
+            });
+        }
+        return chunks;
+    }
+
+    function filenameWithoutExt(name) {
+        return String(name || "").replace(/\.[^.]+$/, "");
+    }
+
+    function buildEntriesFromText(fileName, text) {
+        return splitSemanticChunks(text).map((chunk, index) => ({
+            id: `import-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${index}`,
+            title: `${filenameWithoutExt(fileName)} · ${chunk.title || `片段${index + 1}`}`,
+            tags: extractChunkTags(chunk.content),
+            content: chunk.content,
+            source: fileName
+        }));
+    }
+
+    async function parsePdfToText(file) {
+        try {
+            const pdfjs = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs");
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            const task = pdfjs.getDocument({ data: bytes, disableWorker: true });
+            const doc = await task.promise;
+            const pages = [];
+            for (let i = 1; i <= doc.numPages; i++) {
+                const page = await doc.getPage(i);
+                const content = await page.getTextContent();
+                const line = content.items.map((item) => item.str).join(" ");
+                pages.push(line);
+            }
+            return normalizeText(pages.join("\n\n"));
+        } catch (error) {
+            throw new Error(`PDF 解析失败（${file.name}）：${error.message}`);
+        }
+    }
+
+    async function parseEpubToText(file) {
+        try {
+            const jszipModule = await import("https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm");
+            const JSZip = jszipModule.default || jszipModule;
+            const zip = await JSZip.loadAsync(await file.arrayBuffer());
+            const htmlNames = Object.keys(zip.files)
+                .filter((name) => /\.(xhtml|html|htm)$/i.test(name) && !zip.files[name].dir)
+                .sort();
+            const sections = [];
+            for (const name of htmlNames) {
+                const html = await zip.file(name).async("string");
+                const text = stripHtml(html);
+                if (text.trim()) sections.push(text);
+            }
+            return normalizeText(sections.join("\n\n"));
+        } catch (error) {
+            throw new Error(`EPUB 解析失败（${file.name}）：${error.message}`);
+        }
+    }
+
+    function parseJsonEntries(fileName, jsonText) {
+        const parsed = JSON.parse(jsonText);
+        const rows = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.entries) ? parsed.entries : [parsed]);
+        return rows.map((item, index) => normalizeEntry({
+            id: `import-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${index}`,
+            title: item.title || `${filenameWithoutExt(fileName)} #${index + 1}`,
+            tags: item.tags || extractChunkTags(item.content || JSON.stringify(item)),
+            content: item.content || JSON.stringify(item),
+            source: item.source || fileName,
+            embedding: item.embedding || null,
+            embeddingModel: item.embeddingModel || ""
+        }));
+    }
+
+    async function readFileAsText(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ""));
+            reader.onerror = () => reject(new Error(`读取失败：${file.name}`));
+            reader.readAsText(file);
         });
     }
 
-    function exportEntries() {
-        return JSON.stringify(loadEntries(), null, 2);
+    async function parseFileToEntries(file) {
+        const lower = file.name.toLowerCase();
+        if (lower.endsWith(".json")) {
+            const text = await readFileAsText(file);
+            return parseJsonEntries(file.name, text);
+        }
+        if (lower.endsWith(".pdf")) {
+            const text = await parsePdfToText(file);
+            return buildEntriesFromText(file.name, text);
+        }
+        if (lower.endsWith(".epub")) {
+            const text = await parseEpubToText(file);
+            return buildEntriesFromText(file.name, text);
+        }
+        const text = await readFileAsText(file);
+        return buildEntriesFromText(file.name, text);
+    }
+
+    async function importFiles(fileList) {
+        const files = Array.from(fileList || []);
+        if (!files.length) return loadEntries();
+        const groups = await Promise.all(files.map((file) => parseFileToEntries(file)));
+        const entries = loadEntries();
+        groups.flat().forEach((entry) => entries.unshift(normalizeEntry(entry)));
+        saveEntries(entries);
+        return entries;
     }
 
     function getKeywords(chart, currentYearEval, currentMonthEval, compatibility) {
@@ -130,6 +337,7 @@
             chart.structure.usefulElement,
             chart.structure.maxElement,
             chart.structure.minElement,
+            chart.structure.pattern?.finalPattern,
             ...chart.shensha,
             ...chart.pillars.map((pillar) => pillar.tenGod),
             ...chart.pillars.flatMap((pillar) => pillar.tenGodZhi),
@@ -142,6 +350,19 @@
             keywords.add("子嗣");
         }
         return Array.from(keywords);
+    }
+
+    function buildQueryText(chart, currentYearEval, currentMonthEval, compatibility) {
+        return [
+            `${chart.pillars[2].stem}${chart.pillars[2].branch}日主`,
+            `格局 ${chart.structure.pattern?.finalPattern || ""}`,
+            `用神 ${chart.structure.usefulElement}`,
+            `月令主气 ${chart.structure.commanderInfo?.primaryStem || ""}${chart.structure.commanderInfo?.primaryGod || ""}`,
+            `当前流年 ${currentYearEval?.meta || ""}`,
+            `当前流月 ${currentMonthEval?.meta || ""}`,
+            compatibility ? "合婚 夫妻宫 子嗣" : "",
+            getKeywords(chart, currentYearEval, currentMonthEval, compatibility).join(" ")
+        ].filter(Boolean).join("；");
     }
 
     function matchEntries(chart, currentYearEval, currentMonthEval, compatibility) {
@@ -157,6 +378,18 @@
             .slice(0, 8);
     }
 
+    function semanticMatchEntries(queryEmbedding, limit = 8) {
+        return loadEntries()
+            .filter((entry) => Array.isArray(entry.embedding) && entry.embedding.length)
+            .map((entry) => ({
+                ...entry,
+                score: cosineSimilarity(entry.embedding, queryEmbedding)
+            }))
+            .filter((entry) => entry.score > 0.15)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, limit);
+    }
+
     window.KnowledgeBaseEngine = {
         STORAGE_KEY,
         loadEntries,
@@ -166,6 +399,13 @@
         removeEntry,
         importFiles,
         exportEntries,
-        matchEntries
+        setEntryEmbedding,
+        clearEmbeddings,
+        cosineSimilarity,
+        splitSemanticChunks,
+        extractChunkTags,
+        buildQueryText,
+        matchEntries,
+        semanticMatchEntries
     };
 })();

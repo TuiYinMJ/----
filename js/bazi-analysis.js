@@ -37,7 +37,13 @@
         将星: "将星强调主导、担当和想掌控局面。好处是敢扛事，坏处是容易强势和不服输。",
         桃花: "桃花不是单纯烂桃花，更多是吸引力、审美、社交敏感度。好处是有人缘，坏处是关系更容易复杂。",
         地支重复: "地支重复说明某种主题被反复放大。好处是风格鲜明，坏处是优点和缺点都会更极端。",
-        月日同支: "月日同支说明原生环境和自我/伴侣课题纠缠较深。好处是稳定，坏处是惯性太强，不容易跳出老模式。"
+        月日同支: "月日同支说明原生环境和自我/伴侣课题纠缠较深。好处是稳定，坏处是惯性太强，不容易跳出老模式。",
+        天乙贵人: "天乙贵人是常见的贵人神煞，通常代表关键时刻有人愿意搭把手、给渠道、给台阶。",
+        文昌贵人: "文昌贵人偏学业、考试、证书、写作和理解力，不等于一定高学历，但通常利于脑力输出。",
+        驿马: "驿马主变动、外出、迁移、出差、跳槽和空间转换。好处是动中生机，坏处是动得太频繁也累。",
+        羊刃: "羊刃是力量太硬的信号。好处是敢冲、敢扛、能顶压，坏处是容易用力过猛，带来冲突、伤病或手术主题。",
+        魁罡: "魁罡强调刚、硬、极端和不服输。好处是有骨头、有执行，坏处是过刚则折，不容易转弯。",
+        空亡: "空亡不是绝对没有，而是事情容易出现落空、延迟、预期有但落地慢，或阶段性白忙的感觉。"
     };
     const TEN_GOD_EFFECTS = {
         比肩: { gift: "自己做主、扛事、能硬顶", risk: "固执、好胜、资源不让", work: "适合自己掌控节奏", relation: "容易谁都不让谁" },
@@ -57,6 +63,31 @@
         月柱: "这根柱子主要管父母系统、成长环境、职业基本盘和现实习惯。",
         日柱: "这根柱子是你本人，也是夫妻宫和亲密关系最核心的位置。",
         时柱: "这根柱子主要管子女、晚景、后续计划、内心愿望和事情最后落点。"
+    };
+    const PALACE_PHASE = {
+        年柱: "早年与外部名声层",
+        月柱: "青年到中年的现实承压层",
+        日柱: "核心关系与本人状态层",
+        时柱: "中晚年结果与子女层"
+    };
+    const BLIND_EVENT_HINT = {
+        相穿: "穿到位时，往往不是一次爆炸，而是持续消耗，常见为钱和关系被慢慢穿空。",
+        相破: "破到位时，多见合作破局、计划推倒重来、承诺失效。",
+        相冲: "冲到位时，常见搬动、换岗、分合、关系对撞。",
+        相刑: "刑到位时，常见反复较劲、流程卡壳、内耗加剧。",
+        自刑: "自刑多为自己拧自己，容易在同类问题上循环。"
+    };
+    const STEM_HE_RELATIONS = {
+        甲: { mate: "己", element: "土" },
+        乙: { mate: "庚", element: "金" },
+        丙: { mate: "辛", element: "水" },
+        丁: { mate: "壬", element: "木" },
+        戊: { mate: "癸", element: "火" },
+        己: { mate: "甲", element: "土" },
+        庚: { mate: "乙", element: "金" },
+        辛: { mate: "丙", element: "水" },
+        壬: { mate: "丁", element: "木" },
+        癸: { mate: "戊", element: "火" }
     };
 
     function stat(stats, key) {
@@ -128,10 +159,11 @@
                 );
             }
             const stemEffect = TEN_GOD_EFFECTS[pillar.tenGod] || TEN_GOD_EFFECTS.日主;
+            const palaceInsight = getGodPalaceInsight(pillar.tenGod, pillar.label);
             return buildSection(
                 `${pillar.label} · ${pillar.stem}${pillar.branch}`,
                 `天干十神是${pillar.tenGod}，这表示在${pillar.label.replace("柱", "")}位上，你更容易先拿“${stemEffect.gift}”这一面给别人看。`,
-                `${PILLAR_POSITION_PLAIN[pillar.label]} 但地支里真正压着的是${hiddenPairs.join("、")}，所以这根柱子不是一句“${pillar.tenGod}”就能看完的。遇到压力和现实分工时，它会把${pillar.tenGodZhi.map((god) => `${god}的${buildGodNarrative(god, "gift")}`).join("、")}一并带出来。${relationSummary.plain}`,
+                `${PILLAR_POSITION_PLAIN[pillar.label]} ${palaceInsight} 但地支里真正压着的是${hiddenPairs.join("、")}，所以这根柱子不是一句“${pillar.tenGod}”就能看完的。遇到压力和现实分工时，它会把${pillar.tenGodZhi.map((god) => `${god}的${buildGodNarrative(god, "gift")}`).join("、")}一并带出来。${relationSummary.plain}`,
                 [
                     `表层优点：${pillar.tenGod}常带来“${stemEffect.gift}”。`,
                     `落地方式：在${pillar.label}这个位置，更容易体现为${stemEffect.work}。`,
@@ -153,8 +185,14 @@
             : chart.structure.strength === "身弱"
                 ? `你不是没能力，而是容易被环境、关系和任务强度压住。`
                 : `整体不算偏激，优缺点都在，但成败很看时运和选择。`;
-        const pattern = `${chart.pillars[2].stem}${chart.pillars[2].branch}日主，${chart.structure.strength}。命局旺点在${chart.structure.maxElement}，短板在${chart.structure.minElement}。`;
-        const advice = `${direct} 用神偏向${chart.structure.usefulElement}，辅助用${chart.structure.supportiveElement}。${summarizePatternRelations(chart)} 胎元${chart.extras.taiYuan}、命宫${chart.extras.mingGong}、身宫${chart.extras.shenGong}可辅助看职业气质、阶段性压力和内在驱动力。`;
+        const commander = chart.structure.commanderInfo;
+        const commanderWeights = commander.weights.map((item) => `${item.stem}${item.element} ${Math.round(item.weight * 100)}%`).join("、");
+        const pattern = `${chart.pillars[2].stem}${chart.pillars[2].branch}日主，${chart.structure.strength}。月令主气落在${commander.primaryStem}（${commander.primaryGod}），当前主格按${chart.structure.pattern.finalPattern}处理。命局旺点在${chart.structure.maxElement}，短板在${chart.structure.minElement}。`;
+        const transformText = [
+            ...chart.transformations.stemCombos.filter((item) => item.success).map((item) => `${item.pair}合化${item.element}`),
+            ...chart.transformations.branchCombos.filter((item) => item.success).map((item) => `${item.type}${item.element}`)
+        ];
+        const advice = `${direct} 月令司令分野按“${commanderWeights}”评估，当前节气进度约 ${Math.round(chart.seasonal.jieQi.progress * 100)}%。用神偏向${chart.structure.usefulElement}，辅助用${chart.structure.supportiveElement}，取法属于${chart.structure.yongshen.method}。${chart.structure.yongshen.rationale.join(" ")} ${transformText.length ? `原局已有${transformText.join("、")}，所以不能再只按静态五行个数看。` : ""} ${summarizePatternRelations(chart)} ${chart.blindPatterns?.summary || ""} 胎元${chart.extras.taiYuan}、命宫${chart.extras.mingGong}、身宫${chart.extras.shenGong}可辅助看职业气质、阶段性压力和内在驱动力。`;
         return { pattern, advice };
     }
 
@@ -208,6 +246,15 @@
                 scores[target] -= 9;
                 scores.health -= 3;
             }
+            if (relation.type === "相穿") {
+                scores[target] -= 10;
+                scores.wealth -= 4;
+                scores.health -= 3;
+            }
+            if (relation.type === "相破") {
+                scores[target] -= 6;
+                scores.wealth -= 2;
+            }
             if (relation.type === "相害") {
                 scores[target] -= 5;
                 scores.family -= 2;
@@ -233,6 +280,12 @@
             if (signal.relation.type === "相冲") {
                 negatives.push(`流支冲到${signal.label}${signal.branch}，${signal.domain}更容易出现变化、冲突、搬动或重组。`);
             }
+            if (signal.relation.type === "相穿") {
+                negatives.push(`流支穿到${signal.label}${signal.branch}，${signal.domain}容易出现“表面没炸、内部持续耗损”的状况。`);
+            }
+            if (signal.relation.type === "相破") {
+                negatives.push(`流支破到${signal.label}${signal.branch}，${signal.domain}容易计划反复、协作断裂或约定失效。`);
+            }
             if (signal.relation.type === "相害") {
                 negatives.push(`流支害到${signal.label}${signal.branch}，${signal.domain}表面不炸，但暗耗和误解会增加。`);
             }
@@ -243,6 +296,23 @@
         return { positives: positives.slice(0, 2), negatives: negatives.slice(0, 3) };
     }
 
+    function evaluateTimingTriggers(chart, branch) {
+        const triggers = chart.timingTriggers || [];
+        const hit = triggers.filter((item) => item.triggerBranches.includes(branch));
+        const release = triggers.filter((item) => item.releaseBranches.includes(branch));
+        const riskNotes = hit.map((item) => `应期触发：${item.message}`);
+        const supportNotes = release.map((item) => `应期缓和：${branch}落在${item.key.replace(/^[^-]+-/, "")}对应的六合缓冲位，可做修复、谈判、止损。`);
+        const scoreDelta = {
+            relation: hit.some((item) => item.focus.includes("夫妻宫")) ? -4 : 0,
+            career: hit.some((item) => item.focus.includes("事业")) ? -3 : 0,
+            wealth: hit.length ? -2 * hit.length : 0,
+            family: hit.length ? -2 : 0,
+            health: hit.length ? -1 * hit.length : 0,
+            overall: -2 * hit.length + release.length
+        };
+        return { hit, release, riskNotes, supportNotes, scoreDelta };
+    }
+
     function getBluntLine(scores) {
         if (scores.overall >= 78) return "整体偏顺，但顺的时候也最容易膨胀，别把好运当成自己永远正确。";
         if (scores.overall >= 66) return "有机会，但不是躺赢局，做得对就能拿结果，做错也会付代价。";
@@ -250,10 +320,11 @@
         return "这段时间不算轻松，硬上容易吃亏，越逞强越容易放大问题。";
     }
 
-    function evaluateCycle(chart, pillarText, scope, meta) {
+    function evaluateCycle(chart, pillarText, scope, meta, context = {}) {
         const dayGan = chart.pillars[2].stem;
         const stem = pillarText[0];
         const branch = pillarText[1];
+        const cycleElements = [getStemElement(stem), getBranchElement(branch)];
         const gods = [getTenGod(dayGan, stem), ...LunarUtil.ZHI_HIDE_GAN[branch].map((gan) => getTenGod(dayGan, gan))];
         const scores = { overall: 60, personality: 60, career: 60, wealth: 60, relation: 60, family: 60, health: 60 };
         gods.forEach((god, index) => {
@@ -264,7 +335,7 @@
             scores.relation += (impact.relation || 0) * (index === 0 ? 1.1 : 0.6);
             scores.family += (impact.family || 0) * (index === 0 ? 1.05 : 0.55);
         });
-        [getStemElement(stem), getBranchElement(branch)].forEach((element) => {
+        cycleElements.forEach((element) => {
             const bonus = elementBonus(chart, element);
             scores.career += bonus;
             scores.wealth += bonus * 0.9;
@@ -272,16 +343,58 @@
             scores.family += bonus * 0.75;
             scores.health += bonus * 0.7;
         });
-        if (chart.structure.strength === "身强" && [getStemElement(stem), getBranchElement(branch)].includes(chart.structure.dayElement)) {
+        if (chart.structure.strength === "身强" && cycleElements.includes(chart.structure.dayElement)) {
             scores.health -= 4;
             scores.relation -= 2;
         }
-        if (chart.structure.strength === "身弱" && [getStemElement(stem), getBranchElement(branch)].includes(BaziCore.controlElement(chart.structure.dayElement))) {
+        if (chart.structure.strength === "身弱" && cycleElements.includes(BaziCore.controlElement(chart.structure.dayElement))) {
             scores.health -= 5;
             scores.career -= 3;
         }
+        const elementProfile = getCycleElementProfile(chart, cycleElements);
+        if (elementProfile.positive.length) {
+            scores.overall += 4;
+            scores.career += 3;
+            scores.wealth += 2;
+            scores.health += 1;
+        }
+        if (elementProfile.negative.length) {
+            scores.overall -= 5;
+            scores.relation -= 3;
+            scores.family -= 2;
+        }
         const relationSignals = collectCycleRelations(chart, branch);
         applyCycleRelationScores(scores, relationSignals);
+        const timing = evaluateTimingTriggers(chart, branch);
+        scores.relation += timing.scoreDelta.relation;
+        scores.career += timing.scoreDelta.career;
+        scores.wealth += timing.scoreDelta.wealth;
+        scores.family += timing.scoreDelta.family;
+        scores.health += timing.scoreDelta.health;
+        scores.overall += timing.scoreDelta.overall;
+        const stemCombos = getCycleStemCombos(chart, stem);
+        stemCombos.forEach((combo) => {
+            if (combo.element === chart.structure.usefulElement) {
+                scores.career += 4;
+                scores.wealth += 4;
+            } else if ((chart.structure.yongshen?.avoid || []).includes(combo.element)) {
+                scores.relation -= 3;
+                scores.family -= 2;
+            } else {
+                scores.overall += 1.5;
+            }
+        });
+        const yearMarkers = [];
+        if (context.currentDayunLabel && context.currentDayunLabel === pillarText) {
+            scores.overall -= 2;
+            scores.health -= 2;
+            yearMarkers.push("岁运并临：流年和当前大运干支完全相同，这类年份往往事情更集中，喜忌都会放大。");
+        }
+        if (context.year === context.dayunStartYear || context.year === context.dayunEndYear) {
+            scores.overall -= 2;
+            scores.family -= 2;
+            yearMarkers.push("交脱大运：大运交接附近的年份，节奏通常不稳，容易出现岗位、居所、关系或心态上的切换。");
+        }
         scores.overall = (scores.career + scores.wealth + scores.relation + scores.family + scores.health) / 5;
         Object.keys(scores).forEach((key) => {
             scores[key] = clampScore(scores[key]);
@@ -294,9 +407,11 @@
             meta,
             scores,
             gods,
-            opportunities: [...outcome.opportunities, ...relationNotes.positives].slice(0, 4),
-            risks: [...outcome.risks, ...relationNotes.negatives].slice(0, 4),
+            opportunities: [...outcome.opportunities, ...relationNotes.positives, ...elementProfile.positive, ...timing.supportNotes].slice(0, 6),
+            risks: [...outcome.risks, ...relationNotes.negatives, ...elementProfile.negative, ...timing.riskNotes, ...yearMarkers].slice(0, 7),
             relationSignals,
+            stemCombos,
+            timing,
             blunt: getBluntLine(scores)
         };
     }
@@ -325,6 +440,20 @@
     function buildGodNarrative(god, kind) {
         const meta = TEN_GOD_EFFECTS[god] || TEN_GOD_EFFECTS.日主;
         return meta[kind] || TEN_GOD_PLAIN[god] || god;
+    }
+
+    function getGodPalaceInsight(god, pillarLabel) {
+        const base = TEN_GOD_EFFECTS[god] || TEN_GOD_EFFECTS.日主;
+        if (pillarLabel === "年柱") {
+            return `${PALACE_PHASE[pillarLabel]}里，${god}更容易表现为“${base.gift}”，早年多见在家庭氛围、他人评价和第一印象上。`;
+        }
+        if (pillarLabel === "月柱") {
+            return `${PALACE_PHASE[pillarLabel]}里，${god}直接落到工作分工和现实责任，常见为“${base.work}”，也容易因“${base.risk}”受压。`;
+        }
+        if (pillarLabel === "日柱") {
+            return `${PALACE_PHASE[pillarLabel]}里，${god}会直接进入伴侣互动与自我状态，优势是“${base.gift}”，失衡时先伤关系。`;
+        }
+        return `${PALACE_PHASE[pillarLabel]}里，${god}更容易在子女、长期规划和最终结果上体现，优势与风险会在后段兑现。`;
     }
 
     function describeRelationForPillar(label, relation) {
@@ -374,14 +503,56 @@
         }).slice(0, 4).join(" ");
     }
 
+    function getBlindNotesForPillar(chart, label) {
+        const findings = (chart.blindPatterns?.findings || []).filter((item) => item.from === label || item.to === label);
+        if (!findings.length) return [];
+        return findings.slice(0, 2).map((item) => item.message);
+    }
+
+    function getCycleStemCombos(chart, stem) {
+        return chart.pillars
+            .filter((pillar) => STEM_HE_RELATIONS[stem]?.mate === pillar.stem)
+            .map((pillar) => ({
+                label: pillar.label,
+                stem: pillar.stem,
+                element: STEM_HE_RELATIONS[stem].element
+            }));
+    }
+
+    function getCycleElementProfile(chart, cycleElements) {
+        const useful = chart.structure.usefulElement;
+        const supportive = chart.structure.supportiveElement;
+        const avoid = chart.structure.yongshen?.avoid || [];
+        const positive = [];
+        const negative = [];
+        if (cycleElements.includes(useful)) {
+            positive.push(`岁运五行直接碰到用神${useful}，更容易出现“该来的资源、方向、机会终于接上”的感觉。`);
+        }
+        if (cycleElements.includes(supportive)) {
+            positive.push(`岁运带到辅助用神${supportive}，能帮你把原局里卡住的部分稍微转活。`);
+        }
+        if (cycleElements.includes(chart.structure.yongshen?.climate?.primary)) {
+            positive.push(`这一步岁运也照到了调候重点${chart.structure.yongshen.climate.primary}，对状态、体感和节奏更有帮助。`);
+        }
+        if (cycleElements.some((element) => avoid.includes(element))) {
+            negative.push(`岁运五行碰到了忌神或偏盛元素${cycleElements.filter((element) => avoid.includes(element)).join("、")}，优点和短板会一起被放大。`);
+        }
+        if (cycleElements.some((element) => element === BaziCore.controlElement(useful))) {
+            negative.push(`岁运里有力量直接克你的用神${useful}，事情容易在关键节点卡住或被打断。`);
+        }
+        return { positive, negative };
+    }
+
     function buildPillarInterpretations(chart) {
         return chart.pillars.map((pillar) => {
             const relationSummary = summarizePillarRelations(chart, pillar.label);
             const hiddenPairs = hiddenGodPairs(pillar);
+            const palaceInsight = getGodPalaceInsight(pillar.tenGod, pillar.label);
+            const blindNotes = getBlindNotesForPillar(chart, pillar.label);
             return buildSection(
                 `${pillar.label} · ${pillar.stem}${pillar.branch}`,
                 `${pillarRole(pillar.label)} 表层天干是${pillar.tenGod}，所以别人最先感受到的，多半是“${buildGodNarrative(pillar.tenGod, "gift")}”；但这并不等于全部。`,
-                `这根柱子地支里藏着${hiddenPairs.join("、")}。白话说，你表面走的是${pillar.tenGod}路线，真正卡到利益、压力、关系和现实分工时，内里还会掺进${pillar.tenGodZhi.map((god) => buildGodNarrative(god, "gift")).join("、")}这些动力。${relationSummary.plain}`,
+                `这根柱子地支里藏着${hiddenPairs.join("、")}。${palaceInsight} 白话说，你表面走的是${pillar.tenGod}路线，真正卡到利益、压力、关系和现实分工时，内里还会掺进${pillar.tenGodZhi.map((god) => buildGodNarrative(god, "gift")).join("、")}这些动力。${relationSummary.plain}${blindNotes.length ? ` ${blindNotes.join(" ")}` : ""}`,
                 [
                     `正面看，${pillar.tenGod}在${pillar.label.replace("柱", "")}位上通常意味着“${buildGodNarrative(pillar.tenGod, "work")}”。`,
                     `地势${pillar.diShi}、纳音${pillar.nayin}说明这股气不是空谈，而是会落到真实处境里。`,
@@ -390,6 +561,7 @@
                 [
                     `反面看，${pillar.tenGod}过头时会走向“${buildGodNarrative(pillar.tenGod, "risk")}”。`,
                     `旬空${pillar.xunKong}说明这根柱相关事务在某些阶段容易出现“嘴上有、心里有、落实慢”的感觉。`,
+                    ...blindNotes,
                     ...relationSummary.negatives
                 ].slice(0, 3),
                 `判断这根柱时，至少要同时看天干十神、藏干十神、${pillar.label.replace("柱", "")}位职责和它与其他柱的合冲刑害，少看一层都容易失真。`
@@ -398,17 +570,20 @@
     }
 
     function buildUsefulAnalysis(chart) {
-        const avoid = chart.structure.strength === "身强"
-            ? [chart.structure.maxElement, chart.structure.dayElement]
-            : [BaziCore.controlElement(chart.structure.dayElement), chart.structure.minElement];
+        const avoid = chart.structure.yongshen?.avoid || (
+            chart.structure.strength === "身强"
+                ? [chart.structure.maxElement, chart.structure.dayElement]
+                : [BaziCore.controlElement(chart.structure.dayElement), chart.structure.minElement]
+        );
         return [
             buildSection(
                 "用神重点",
-                `当前命局主要用神偏向${chart.structure.usefulElement}，辅助用${chart.structure.supportiveElement}。`,
-                "白话说，不是你缺什么就机械补什么，而是要补能让整个结构重新平衡的那股力量。",
+                `当前命局主要用神偏向${chart.structure.usefulElement}，辅助用${chart.structure.supportiveElement}，取法属于${chart.structure.yongshen.method}。`,
+                `白话说，不是你缺什么就机械补什么，而是要补能让整个结构重新平衡、同时照顾格局和调候的那股力量。${chart.structure.yongshen.rationale.join(" ")}`,
                 [
                     `${chart.structure.usefulElement}相关的环境、行业、节奏、习惯更容易帮你把盘面拉回正位。`,
-                    `${chart.structure.supportiveElement}可以做辅助，但通常不能代替主用神。`
+                    `${chart.structure.supportiveElement}可以做辅助，但通常不能代替主用神。`,
+                    `当前季节调候重点偏${chart.structure.yongshen.climate.primary}，因为${chart.structure.yongshen.climate.reason}`
                 ],
                 [
                     "如果只看表面喜欢什么，不看真正用神，很容易越补越偏。",
@@ -419,7 +594,7 @@
             buildSection(
                 "忌神与避讳",
                 `当前最需要防的是${avoid.join("、")}被继续放大。`,
-                "白话说，你的问题不一定来自“没有”，也可能来自“太多了还继续堆”。",
+                "白话说，你的问题不一定来自“没有”，也可能来自“太多了还继续堆”。如果这些元素刚好又在岁运里被触发，问题会比静态原局更明显。",
                 [
                     "知道忌神的价值，在于你会知道哪些环境和选择在放大你的短板。",
                     "避讳不是迷信禁忌，而是减少明显对自己不利的决策。"
@@ -473,6 +648,46 @@
                 ? ["如果忽视这类结构，相关关系和事务通常会在压力期集中爆出来。"]
                 : ["即使是合，也可能合住、拖住、黏住，不代表绝对轻松。"];
             cards.push(buildSection(title, verdict, plain, positives, negatives, "结构关系要落实到宫位上看，尤其要看它究竟碰到了年柱、月柱、日柱还是时柱。"));
+        });
+        (chart.blindPatterns?.findings || []).slice(0, 4).forEach((item) => {
+            cards.push(buildSection(
+                `盲派断点 · ${item.type} ${item.pair}`,
+                item.message,
+                `白话说：${BLIND_EVENT_HINT[item.type] || "这是应期触发点，遇到岁运并临时通常会出具体事件。"} 重点宫位是${item.focus}。`,
+                ["提前做边界和预案，能把损失变成可控代价。"],
+                ["如果忽视这一类断点，往往不是一次性爆雷，而是连续性消耗。"],
+                "盲派看“做功”和“体用”，关键是找真正会出事的宫位与时间点。"
+            ));
+        });
+        if (chart.blindPatterns?.juePillars?.length) {
+            cards.push(buildSection(
+                "地势见绝",
+                chart.blindPatterns.summary,
+                "白话说：地势见“绝”不代表必凶，但对应宫位抗压余量更薄，遇到冲穿破时更容易直接应事。",
+                ["提前做缓冲（资金、健康、关系沟通）比事后补救有效。"],
+                ["逢高压年份如果继续硬顶，容易把小问题拖成系统性问题。"],
+                "见绝位的年份，建议优先做止损和结构调整。"
+            ));
+        }
+        chart.transformations.stemCombos.forEach((item) => {
+            cards.push(buildSection(
+                `${item.pair}天干五合`,
+                item.success ? `${item.pair}这组合不只是相合，已经朝${item.element}化气去看。` : `${item.pair}虽有五合，但更像牵制和合住，未到彻底化气。`,
+                item.reason,
+                [item.success ? `化气${item.element}成功后，原局五行重心会朝${item.element}移动。` : "即使未化，也会让相关宫位彼此牵扯，不再各走各的。"] ,
+                [item.success ? "合化成功不代表全吉，只是力量归属改变了。" : "把五合直接当“必化”会误判格局和用神。"] ,
+                "五合一定要看月令、根气和透出，不是看到甲己、丙辛就直接判化。"
+            ));
+        });
+        chart.transformations.branchCombos.forEach((item) => {
+            cards.push(buildSection(
+                `${item.type} · ${item.pair}`,
+                item.success ? `${item.pair}在原局里已经能按${item.element}气去看。` : `${item.pair}有合局之形，但还没强到完全改气。`,
+                item.reason,
+                [item.success ? `${item.element}气被明显放大，相关事件类型会更集中。` : "即使未完全化气，原局取向也已经往这一边偏了。"] ,
+                [item.success ? "合局成功后，原来单独看每一支的办法会失真。" : "只看成组不看成不成局，最容易把吉凶看反。"] ,
+                "三合、三会、六合、半合都要看‘有没有形’和‘有没有气’，两者缺一都不能乱断。"
+            ));
         });
         cards.push(
             buildSection("命宫与身宫", `命宫${chart.extras.mingGong}，身宫${chart.extras.shenGong}。`, "白话说，命宫更像你的大方向和底色，身宫更像你真正动起来时会往哪种状态跑。", ["命宫适合看人生主题。", "身宫适合看执行状态和真正发力点。"], ["命宫和身宫好的时候不代表不用努力。", "命宫和身宫有压的时候，也不代表注定差。"], "把命宫当方向，把身宫当落地方式，会更实用。")
@@ -640,6 +855,153 @@
         ];
     }
 
+    function buildCriticalYears(chart, yearEvaluations) {
+        const list = (yearEvaluations || []).map((item) => {
+            const triggerCount = item.evaluation?.timing?.hit?.length || 0;
+            const releaseCount = item.evaluation?.timing?.release?.length || 0;
+            const riskScore = (100 - item.evaluation.scores.overall) * 0.35
+                + (100 - item.evaluation.scores.relation) * 0.25
+                + (100 - item.evaluation.scores.health) * 0.2
+                + triggerCount * 8
+                - releaseCount * 3;
+            const chanceScore = item.evaluation.scores.overall * 0.3
+                + item.evaluation.scores.career * 0.25
+                + item.evaluation.scores.wealth * 0.25
+                + item.evaluation.scores.relation * 0.2
+                + releaseCount * 4
+                - triggerCount * 3;
+            return {
+                ...item,
+                riskScore: Math.round(riskScore),
+                chanceScore: Math.round(chanceScore)
+            };
+        });
+        const risky = [...list]
+            .sort((a, b) => b.riskScore - a.riskScore)
+            .slice(0, 8)
+            .map((item) => ({
+                year: item.year,
+                pillar: item.pillar,
+                reason: item.evaluation.risks[0] || item.evaluation.blunt,
+                focus: item.evaluation.timing?.hit?.[0]?.focus || "综合"
+            }));
+        const favorable = [...list]
+            .sort((a, b) => b.chanceScore - a.chanceScore)
+            .slice(0, 8)
+            .map((item) => ({
+                year: item.year,
+                pillar: item.pillar,
+                reason: item.evaluation.opportunities[0] || item.evaluation.blunt,
+                focus: item.evaluation.timing?.release?.[0]?.focus || "综合"
+            }));
+        return { risky, favorable };
+    }
+
+    function buildEventDashboard(chart, yearEvaluations, monthEvaluations) {
+        const years = yearEvaluations || [];
+        const months = monthEvaluations || [];
+        const marriageWindows = [...years]
+            .sort((a, b) => b.evaluation.scores.relation - a.evaluation.scores.relation)
+            .slice(0, 4)
+            .map((item) => ({
+                year: item.year,
+                pillar: item.pillar,
+                note: `关系分 ${item.evaluation.scores.relation}，${item.evaluation.opportunities[0]}`
+            }));
+        const marriageRisk = [...years]
+            .filter((item) => item.evaluation.scores.relation <= 62 || (item.evaluation.timing?.hit || []).some((hit) => hit.focus.includes("夫妻宫")))
+            .sort((a, b) => a.evaluation.scores.relation - b.evaluation.scores.relation)
+            .slice(0, 4)
+            .map((item) => ({
+                year: item.year,
+                pillar: item.pillar,
+                note: item.evaluation.risks[0]
+            }));
+        const wealthPeaks = [...years]
+            .sort((a, b) => b.evaluation.scores.wealth - a.evaluation.scores.wealth)
+            .slice(0, 4)
+            .map((item) => ({
+                year: item.year,
+                pillar: item.pillar,
+                note: `财运分 ${item.evaluation.scores.wealth}，${item.evaluation.opportunities[0]}`
+            }));
+        const wealthPits = [...years]
+            .sort((a, b) => a.evaluation.scores.wealth - b.evaluation.scores.wealth)
+            .slice(0, 4)
+            .map((item) => ({
+                year: item.year,
+                pillar: item.pillar,
+                note: item.evaluation.risks[0]
+            }));
+        const healthTraffic = [...months]
+            .sort((a, b) => a.evaluation.scores.health - b.evaluation.scores.health)
+            .slice(0, 4)
+            .map((item) => ({
+                month: item.month,
+                pillar: item.pillar,
+                level: item.evaluation.scores.health <= 58 ? "红灯" : item.evaluation.scores.health <= 66 ? "黄灯" : "绿灯",
+                note: item.evaluation.risks[0]
+            }));
+        return {
+            marriageWindows,
+            marriageRisk,
+            wealthPeaks,
+            wealthPits,
+            healthTraffic
+        };
+    }
+
+    function buildModernLifeAdvice(chart, compatibility, targetYear) {
+        const directionMap = {
+            木: { seat: "东 / 东南", sleep: "床头朝东或东南", style: "多用木质、绿植、分层收纳，强调生长感。" },
+            火: { seat: "南", sleep: "床头朝南", style: "增加采光与暖色，减少潮湿阴暗角落。" },
+            土: { seat: "中宫 / 东北 / 西南", sleep: "床头朝东北或西南", style: "重稳定和秩序，减少杂乱、堆积和动线阻塞。" },
+            金: { seat: "西 / 西北", sleep: "床头朝西北", style: "偏简洁、规则、留白，避免过多软装干扰。", },
+            水: { seat: "北", sleep: "床头朝北", style: "重安静、湿度和恢复环境，减少高噪音与强光。", }
+        };
+        const useful = directionMap[chart.structure.usefulElement];
+        const support = directionMap[chart.structure.supportiveElement];
+        const elementHourMap = {
+            木: ["寅", "卯"],
+            火: ["巳", "午"],
+            土: ["辰", "戌", "丑", "未"],
+            金: ["申", "酉"],
+            水: ["亥", "子"]
+        };
+        const avoidElement = BaziCore.controlElement(chart.structure.usefulElement);
+        const usefulHours = elementHourMap[chart.structure.usefulElement] || [];
+        const avoidHours = elementHourMap[avoidElement] || [];
+        const teamLine = compatibility
+            ? `当前双人合盘里，沟通分 ${compatibility.scores.communication}、财务分 ${compatibility.scores.finance}。团队协作时让沟通分高的人做接口，让财务分高的人抓预算和结算。`
+            : "未启用合盘。若后续扩展到团队合盘，建议用“沟通分+财务分+冲突位”三维评价成员协同。";
+        return [
+            buildSection(
+                "风水与方位建议",
+                `用神偏${chart.structure.usefulElement}，今年办公位建议朝向${useful.seat}，睡眠位建议${useful.sleep}。`,
+                `白话说，方位不是迷信加成，而是帮你把长期节律放到更稳的位置。辅助元素${chart.structure.supportiveElement}可用${support.seat}做补位。`,
+                [`办公空间建议：${useful.style}`, `辅助补位可参考：${support.style}`],
+                ["忌神方向不必完全禁用，但不建议长期主坐。", "环境再好，作息和边界不稳也会失效。"],
+                "先固定工位和睡眠朝向，再微调灯光、通风、噪音和动线。"
+            ),
+            buildSection(
+                "团队与人际协同",
+                "关系与协作不只看感觉，更要看分工。",
+                teamLine,
+                ["把“对外沟通、对内执行、财务把关”分给不同强项的人，组织更稳。"],
+                ["让同一人同时扛沟通和对抗，最容易在压力期崩盘。"],
+                "团队合盘建议后续扩展到多人录入，按角色自动给排班和冲突预警。"
+            ),
+            buildSection(
+                `${targetYear}年日课与时段提示`,
+                `今年对你更顺的时段是${usefulHours.join("、")}时，冲突高发时段多在${avoidHours.join("、")}时。`,
+                "白话说，重要会谈、签约、复盘尽量放在顺时段；高压沟通、硬碰硬会议尽量避开忌时段。",
+                [`宜：把关键沟通安排在${usefulHours.join("、")}时。`, "宜：把恢复和深度工作安排在固定时段。"],
+                [`忌：${avoidHours.join("、")}时做高冲突会议。`, "忌：熬夜后立刻做重大财务和关系决策。"],
+                "择吉的核心是降低失误率，不是追求神奇收益。"
+            )
+        ];
+    }
+
     function getEnvironmentAnalysis(chart, targetYear) {
         const liuNianSolar = Solar.fromYmdHms(targetYear, 6, 15, 12, 0, 0);
         const pillar = liuNianSolar.getLunar().getYearInGanZhiExact();
@@ -668,6 +1030,9 @@
         getWuxingSummary,
         getShishenAnalysis,
         getPatternAnalysis,
-        getEnvironmentAnalysis
+        getEnvironmentAnalysis,
+        buildCriticalYears,
+        buildEventDashboard,
+        buildModernLifeAdvice
     };
 })();

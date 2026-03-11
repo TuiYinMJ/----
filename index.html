@@ -294,6 +294,13 @@
                     <div id="pillar-interpretations" class="pair-grid"></div>
                 </div>
 
+                <div class="card">
+                    <h2>交互式地支关系盘</h2>
+                    <p class="muted">点击任意地支，可高亮六合、相冲、相穿（害）、相破、相刑，并查看这层关系在现实中的直白解释。</p>
+                    <div id="branch-relation-board" class="branch-board"></div>
+                    <div id="branch-relation-detail" class="preview-panel"></div>
+                </div>
+
                 <div class="grid-2">
                     <div class="card">
                         <h2>十神分析</h2>
@@ -337,6 +344,11 @@
                     <canvas id="fortune-chart" width="1200" height="320"></canvas>
                 </div>
                 <div class="card">
+                    <h2>人生路书（0 - 80 岁）</h2>
+                    <canvas id="life-roadmap-chart" width="1200" height="360"></canvas>
+                    <div id="life-roadmap-summary" class="pair-grid"></div>
+                </div>
+                <div class="card">
                     <h2>年度专题走势图</h2>
                     <canvas id="year-domain-chart" width="1200" height="340"></canvas>
                     <div id="year-events" class="pair-grid"></div>
@@ -354,6 +366,23 @@
                     <div class="card">
                         <h2>当前流月重点解析</h2>
                         <div id="current-month-focus"></div>
+                    </div>
+                </div>
+                <div class="card">
+                    <h2>事件仪表盘</h2>
+                    <div class="grid-2">
+                        <div>
+                            <h3>婚姻仪表盘</h3>
+                            <div id="dashboard-marriage" class="pair-grid"></div>
+                        </div>
+                        <div>
+                            <h3>财富仪表盘</h3>
+                            <div id="dashboard-wealth" class="pair-grid"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <h3>健康红绿灯（流月）</h3>
+                        <div id="dashboard-health-traffic" class="pair-grid"></div>
                     </div>
                 </div>
             </section>
@@ -395,6 +424,58 @@
 
             <section id="section-ai-analysis" class="section">
                 <div class="card">
+                    <h2>LLM 与 RAG 配置</h2>
+                    <p class="muted">支持 OpenAI 兼容接口和本地 Ollama。当前是纯前端本地版，模型调用依赖目标接口允许浏览器直接跨域访问；如果目标服务拦截 CORS，仍需要你自己加本地代理。</p>
+                    <div class="pair-grid">
+                        <div class="form-group">
+                            <label for="llm-provider">接口类型</label>
+                            <select id="llm-provider">
+                                <option value="none" selected>仅使用本地规则引擎</option>
+                                <option value="openai">OpenAI 兼容接口</option>
+                                <option value="ollama">本地 Ollama</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="llm-workflow-mode">推理工作流</label>
+                            <select id="llm-workflow-mode">
+                                <option value="multi" selected>多 Agent 协作（推荐）</option>
+                                <option value="single">单次直出</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="llm-base-url">Base URL</label>
+                            <input id="llm-base-url" type="text" placeholder="例如：https://api.openai.com/v1 或 http://127.0.0.1:11434">
+                        </div>
+                        <div class="form-group">
+                            <label for="llm-api-key">API Key</label>
+                            <input id="llm-api-key" type="password" placeholder="OpenAI 兼容接口通常需要，Ollama 本地一般可留空">
+                        </div>
+                        <div class="form-group">
+                            <label for="llm-model">分析模型</label>
+                            <select id="llm-model">
+                                <option value="">请先获取模型</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="embedding-model">向量模型</label>
+                            <input id="embedding-model" type="text" placeholder="例如：text-embedding-3-small / nomic-embed-text">
+                        </div>
+                        <div class="form-group">
+                            <label>&nbsp;</label>
+                            <div class="form-actions">
+                                <button type="button" class="btn btn-secondary" id="btn-llm-models">获取模型列表</button>
+                                <button type="button" class="btn btn-secondary" id="btn-kb-reindex">重建向量索引</button>
+                                <button type="button" class="btn btn-primary" id="btn-llm-generate">调用 LLM 生成报告</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="llm-prompt-template">Prompt 模板</label>
+                        <textarea id="llm-prompt-template" rows="8" placeholder="这里可以调整大模型的人设、输出格式和分析要求。"></textarea>
+                    </div>
+                    <div id="llm-status" class="preview-panel"></div>
+                </div>
+                <div class="card">
                     <h2>AI综合命理分析报告</h2>
                     <div class="form-actions">
                         <button type="button" class="btn btn-secondary" id="btn-export-markdown">导出 Markdown 报告</button>
@@ -405,6 +486,8 @@
                         <div class="loading-spinner"></div>
                         <p>本地分析引擎正在组织报告...</p>
                     </div>
+                    <div id="llm-report"></div>
+                    <div id="llm-agent-report"></div>
                     <div id="ai-report"></div>
                 </div>
                 <div class="grid-2">
@@ -440,11 +523,12 @@
                 </div>
                 <div class="card">
                     <h2>本地知识库</h2>
-                    <p class="muted">可导入你自己的命理笔记、摘要、书目索引或整理后的条目。系统会在分析时提取相关参考，不上传到网络。</p>
+                    <p class="muted">可导入 TXT/MD/JSON/PDF/EPUB。系统会先做命理语义分块，再做关键词与向量检索，不上传到网络。</p>
                     <div class="form-actions">
-                        <input id="kb-file-input" type="file" accept=".txt,.md,.json" multiple>
+                        <input id="kb-file-input" type="file" accept=".txt,.md,.json,.pdf,.epub" multiple>
                         <button type="button" class="btn btn-secondary" id="btn-kb-export">导出知识库</button>
                         <button type="button" class="btn btn-secondary" id="btn-kb-seed">恢复内置书目</button>
+                        <button type="button" class="btn btn-secondary" id="btn-kb-reindex-inline">重建向量索引</button>
                     </div>
                     <div class="pair-grid">
                         <div class="form-group">
@@ -475,14 +559,15 @@
     </div>
 
     <script src="js/vendor/lunar.js"></script>
-    <script src="js/bazi-core.js"></script>
-    <script src="js/bazi-analysis.js"></script>
-    <script src="js/compatibility.js"></script>
-    <script src="js/dayun.js"></script>
-    <script src="js/health.js"></script>
-    <script src="js/ai-engine.js"></script>
-    <script src="js/knowledge-base.js"></script>
-    <script src="js/charts.js"></script>
-    <script src="js/app.js"></script>
+    <script src="js/bazi-core.js?v=20260311"></script>
+    <script src="js/bazi-analysis.js?v=20260311"></script>
+    <script src="js/compatibility.js?v=20260311"></script>
+    <script src="js/dayun.js?v=20260311"></script>
+    <script src="js/health.js?v=20260311"></script>
+    <script src="js/ai-engine.js?v=20260311"></script>
+    <script src="js/llm-client.js?v=20260311"></script>
+    <script src="js/knowledge-base.js?v=20260311"></script>
+    <script src="js/charts.js?v=20260311"></script>
+    <script src="js/app.js?v=20260311"></script>
 </body>
 </html>

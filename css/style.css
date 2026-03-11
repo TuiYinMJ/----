@@ -323,6 +323,18 @@ textarea {
     gap: 12px;
 }
 
+#llm-report {
+    display: grid;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+#llm-agent-report {
+    display: grid;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
 .wuxing-row {
     display: grid;
     grid-template-columns: 56px 1fr 42px;
@@ -373,6 +385,53 @@ textarea {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 12px;
+}
+
+.branch-board {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.branch-node {
+    border: 1px solid rgba(89, 58, 28, 0.2);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.78);
+    padding: 10px;
+    cursor: pointer;
+    color: var(--text);
+}
+
+.branch-node.is-base {
+    border-color: rgba(154, 52, 18, 0.5);
+    background: rgba(154, 52, 18, 0.12);
+}
+
+.branch-node.is-he {
+    border-color: rgba(63, 98, 18, 0.5);
+    background: rgba(63, 98, 18, 0.12);
+}
+
+.branch-node.is-chong {
+    border-color: rgba(153, 27, 27, 0.55);
+    background: rgba(153, 27, 27, 0.12);
+}
+
+.branch-node.is-chuan,
+.branch-node.is-po,
+.branch-node.is-xing {
+    border-color: rgba(180, 83, 9, 0.55);
+    background: rgba(180, 83, 9, 0.12);
+}
+
+.marker-chip {
+    display: inline-flex;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    border: 1px solid rgba(89, 58, 28, 0.2);
+    margin-right: 6px;
 }
 
 .report-block h3, .card h2, .card h3 {
@@ -465,5 +524,9 @@ textarea {
 
     .pillars-container {
         grid-template-columns: 1fr;
+    }
+
+    .branch-board {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
     }
 }

@@ -122,10 +122,65 @@
         });
     }
 
+    function drawRoadmapChart(canvas, points, markers = []) {
+        const ctx = canvas.getContext("2d");
+        const { width, height } = canvas;
+        const padding = 54;
+        const min = 35;
+        const max = 95;
+        ctx.clearRect(0, 0, width, height);
+        ctx.strokeStyle = "rgba(89,58,28,0.14)";
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 5; i++) {
+            const y = padding + ((height - padding * 2) / 4) * i;
+            ctx.beginPath();
+            ctx.moveTo(padding, y);
+            ctx.lineTo(width - padding, y);
+            ctx.stroke();
+        }
+        ctx.strokeStyle = "#9a3412";
+        ctx.lineWidth = 2.6;
+        ctx.beginPath();
+        points.forEach((item, index) => {
+            const x = padding + ((width - padding * 2) / Math.max(points.length - 1, 1)) * index;
+            const y = height - padding - ((item.value - min) / (max - min)) * (height - padding * 2);
+            if (index === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        points.forEach((item, index) => {
+            const x = padding + ((width - padding * 2) / Math.max(points.length - 1, 1)) * index;
+            const y = height - padding - ((item.value - min) / (max - min)) * (height - padding * 2);
+            ctx.fillStyle = "rgba(154,52,18,0.78)";
+            ctx.beginPath();
+            ctx.arc(x, y, 2.8, 0, Math.PI * 2);
+            ctx.fill();
+            if (index % 4 === 0) {
+                ctx.fillStyle = "#78624b";
+                ctx.font = "11px sans-serif";
+                ctx.fillText(String(item.age), x - 8, height - 20);
+            }
+        });
+        markers.forEach((marker) => {
+            const index = marker.index;
+            if (index < 0 || index >= points.length) return;
+            const x = padding + ((width - padding * 2) / Math.max(points.length - 1, 1)) * index;
+            const y = height - padding - ((points[index].value - min) / (max - min)) * (height - padding * 2);
+            ctx.fillStyle = marker.type === "wealth" ? "#b45309" : marker.type === "relation" ? "#be123c" : "#0f766e";
+            ctx.beginPath();
+            ctx.arc(x, y, 5.6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = "#fff";
+            ctx.font = "10px sans-serif";
+            ctx.fillText(marker.symbol || "!", x - 3, y + 3);
+        });
+    }
+
     window.ChartRenderer = {
         renderRadar,
         drawLineChart,
         drawMultiLineChart,
-        drawBarChart
+        drawBarChart,
+        drawRoadmapChart
     };
 })();

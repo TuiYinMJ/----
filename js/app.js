@@ -1,5 +1,6 @@
 (function () {
     const STORAGE_KEY = "tming-bazi-profiles-v4";
+    const AI_CONFIG_KEY = "tming-ai-config-v1";
     const REGIONS = [
         { name: "上海", longitude: 121.47, timezoneOffset: 8 },
         { name: "北京", longitude: 116.41, timezoneOffset: 8 },
@@ -71,7 +72,7 @@
         }
     };
 
-    const state = { current: null };
+    const state = { current: null, ai: null };
     const TRUE_SOLAR_GROUPS = {
         high: "建议重点核对真太阳时（偏差 >= 40 分钟）",
         low: "通常标准时即可（偏差 < 40 分钟）",
@@ -80,6 +81,32 @@
 
     function $(id) {
         return document.getElementById(id);
+    }
+
+    function defaultAiConfig() {
+        return {
+            provider: "none",
+            workflowMode: "multi",
+            baseUrl: "",
+            apiKey: "",
+            model: "",
+            embeddingModel: "",
+            promptTemplate: AIEngine.DEFAULT_PROMPT_TEMPLATE
+        };
+    }
+
+    function loadAiConfig() {
+        try {
+            return { ...defaultAiConfig(), ...(JSON.parse(localStorage.getItem(AI_CONFIG_KEY) || "null") || {}) };
+        } catch {
+            return defaultAiConfig();
+        }
+    }
+
+    function saveAiConfig(config) {
+        state.ai = { ...defaultAiConfig(), ...config };
+        localStorage.setItem(AI_CONFIG_KEY, JSON.stringify(state.ai));
+        return state.ai;
     }
 
     function pad(value) {
@@ -124,10 +151,6 @@
 
     function parseMonthOptionValue(rawValue, config) {
         const value = String(rawValue || $(config.month).value || "1");
-        if (value.includes("|")) {
-            const [month, leap] = value.split("|");
-            return { month: Number(month), lunarLeap: leap === "1" };
-        }
         return {
             month: Number(value),
             lunarLeap: $(config.calendarType).value === "lunar" && $(config.lunarLeap).value === "1"
@@ -144,11 +167,11 @@
 
     function setMonthSelection(config, month, lunarLeap) {
         const monthEl = $(config.month);
-        const candidates = $(config.calendarType).value === "lunar"
-            ? [`${month}|${lunarLeap ? 1 : 0}`, `${month}|0`, `${month}|1`]
-            : [String(month)];
-        const selected = candidates.find((value) => Array.from(monthEl.options).some((option) => option.value === value));
-        monthEl.value = selected || monthEl.options[0]?.value || "1";
+        const selected = Array.from(monthEl.options).some((option) => option.value === String(month)) ? String(month) : (monthEl.options[0]?.value || "1");
+        monthEl.value = selected;
+        if ($(config.calendarType).value === "lunar") {
+            $(config.lunarLeap).value = lunarLeap ? "1" : "0";
+        }
     }
 
     function getRegionGroupNote(region) {
@@ -169,27 +192,12 @@
         const previous = getMonthSelection(config);
         const leapMonth = LunarYear.fromYear(year).getLeapMonth();
         monthEl.innerHTML = "";
-        if (calendarType === "solar") {
-            for (let month = 1; month <= 12; month++) {
-                const option = document.createElement("option");
-                option.value = String(month);
-                option.textContent = String(month);
-                if (month === previous.month) option.selected = true;
-                monthEl.appendChild(option);
-            }
-            return;
-        }
         for (let month = 1; month <= 12; month++) {
-            const normalOption = document.createElement("option");
-            normalOption.value = `${month}|0`;
-            normalOption.textContent = leapMonth === month ? `${month}月（本年另有闰${month}月）` : `${month}月`;
-            monthEl.appendChild(normalOption);
-            if (leapMonth === month) {
-                const leapOption = document.createElement("option");
-                leapOption.value = `${month}|1`;
-                leapOption.textContent = `闰${month}月`;
-                monthEl.appendChild(leapOption);
-            }
+            const option = document.createElement("option");
+            option.value = String(month);
+            option.textContent = calendarType === "lunar" && leapMonth === month ? `${month}月（该年有闰${month}月）` : String(month);
+            if (month === previous.month) option.selected = true;
+            monthEl.appendChild(option);
         }
         setMonthSelection(config, previous.month, previous.lunarLeap);
     }
@@ -211,7 +219,42 @@
     function initSelects() {
         initProfileControls(PROFILE_CONFIGS.primary, new Date().getFullYear() - 30, 6, 18, 0);
         initProfileControls(PROFILE_CONFIGS.compat, new Date().getFullYear() - 28, 10, 9, 0);
-        fillSelect(PROFILE_CONFIGS.primary.targetYear, 2020, 2045, new Date().getFullYear());
+        fillSelect(PROFILE_CONFIGS.primary.targetYear, 1900, 2099, new Date().getFullYear());
+        renderAiConfig(loadAiConfig());
+    }
+
+    function renderAiConfig(config) {
+        $("llm-provider").value = config.provider;
+        $("llm-workflow-mode").value = config.workflowMode || "multi";
+        $("llm-base-url").value = config.baseUrl;
+        $("llm-api-key").value = config.apiKey;
+        $("embedding-model").value = config.embeddingModel;
+        $("llm-prompt-template").value = config.promptTemplate || AIEngine.DEFAULT_PROMPT_TEMPLATE;
+        $("llm-model").innerHTML = config.model
+            ? `<option value="${escapeHtml(config.model)}" selected>${escapeHtml(config.model)}</option>`
+            : `<option value="">请先获取模型</option>`;
+        state.ai = config;
+        renderLlmStatus(`当前模式：${config.provider === "none" ? "仅本地规则引擎" : config.provider === "openai" ? "OpenAI 兼容接口" : "Ollama"}；工作流：${config.workflowMode === "multi" ? "多 Agent" : "单次直出"}。${config.model ? `已选择模型 ${config.model}。` : "尚未选择模型。"}${config.embeddingModel ? ` 向量模型 ${config.embeddingModel}。` : ""}`);
+    }
+
+    function getAiConfigFromForm() {
+        return {
+            provider: $("llm-provider").value,
+            workflowMode: $("llm-workflow-mode").value || "multi",
+            baseUrl: $("llm-base-url").value.trim(),
+            apiKey: $("llm-api-key").value.trim(),
+            model: $("llm-model").value.trim(),
+            embeddingModel: $("embedding-model").value.trim(),
+            promptTemplate: $("llm-prompt-template").value.trim() || AIEngine.DEFAULT_PROMPT_TEMPLATE
+        };
+    }
+
+    function persistAiConfigFromForm() {
+        saveAiConfig(getAiConfigFromForm());
+    }
+
+    function renderLlmStatus(message) {
+        $("llm-status").innerHTML = `<p>${message}</p>`;
     }
 
     function bindEvents() {
@@ -230,10 +273,18 @@
         $("btn-export-markdown").addEventListener("click", exportMarkdownReport);
         $("btn-export-html").addEventListener("click", exportHtmlReport);
         $("btn-print-report").addEventListener("click", printReport);
+        $("btn-llm-models").addEventListener("click", refreshLlmModels);
+        $("btn-llm-generate").addEventListener("click", generateLlmReport);
+        $("btn-kb-reindex").addEventListener("click", rebuildKnowledgeVectors);
+        $("btn-kb-reindex-inline").addEventListener("click", rebuildKnowledgeVectors);
         $("btn-kb-export").addEventListener("click", exportKnowledgeBase);
         $("btn-kb-seed").addEventListener("click", resetKnowledgeBase);
         $("btn-kb-add").addEventListener("click", addKnowledgeBaseEntry);
         $("kb-file-input").addEventListener("change", importKnowledgeBaseFiles);
+        ["llm-provider", "llm-workflow-mode", "llm-base-url", "llm-api-key", "llm-model", "embedding-model", "llm-prompt-template"].forEach((id) => {
+            $(id).addEventListener("change", persistAiConfigFromForm);
+            $(id).addEventListener("input", persistAiConfigFromForm);
+        });
         bindProfileEvents(PROFILE_CONFIGS.primary);
         bindProfileEvents(PROFILE_CONFIGS.compat);
         $(PROFILE_CONFIGS.compat.enabled).addEventListener("change", () => {
@@ -325,10 +376,8 @@
             leapEl.disabled = true;
             return;
         }
-        const { month, lunarLeap } = getMonthSelection(config);
-        const leapMonth = LunarYear.fromYear(Number($(config.year).value)).getLeapMonth();
-        leapEl.value = leapMonth === month && lunarLeap ? "1" : "0";
-        leapEl.disabled = true;
+        // 农历模式下把闰月开关始终交给用户手动控制，是否合法在预览和提交时校验。
+        leapEl.disabled = false;
     }
 
     function syncDayOptions(config) {
@@ -342,7 +391,12 @@
             maxDay = new Date(year, month, 0).getDate();
         } else {
             const lunarMonth = lunarLeap ? -month : month;
-            const lunarMonthInfo = LunarYear.fromYear(year).getMonth(lunarMonth);
+            const yearInfo = LunarYear.fromYear(year);
+            let lunarMonthInfo = yearInfo.getMonth(lunarMonth);
+            // 非法闰月组合时，先退回平月天数展示，最终以校验提示为准。
+            if (!lunarMonthInfo && lunarLeap) {
+                lunarMonthInfo = yearInfo.getMonth(month);
+            }
             maxDay = lunarMonthInfo ? lunarMonthInfo.getDayCount() : 30;
         }
         dayEl.innerHTML = "";
@@ -353,6 +407,20 @@
             if (i === Math.min(previous, maxDay)) option.selected = true;
             dayEl.appendChild(option);
         }
+    }
+
+    function validateLunarLeapChoice(input) {
+        if (input.calendarType !== "lunar" || !input.lunarLeap) {
+            return { valid: true, leapMonth: LunarYear.fromYear(input.year).getLeapMonth() };
+        }
+        const leapMonth = LunarYear.fromYear(input.year).getLeapMonth();
+        if (!leapMonth) {
+            return { valid: false, leapMonth, message: `你选择了闰月，但 ${input.year} 年没有闰月。` };
+        }
+        if (leapMonth !== input.month) {
+            return { valid: false, leapMonth, message: `你选择了闰月，但 ${input.year} 年只有闰${leapMonth}月，没有闰${input.month}月。` };
+        }
+        return { valid: true, leapMonth };
     }
 
     function getTimeParts(config) {
@@ -392,20 +460,27 @@
         }
         try {
             const input = getProfileInput(config);
+            const leapValidation = validateLunarLeapChoice(input);
+            if (!leapValidation.valid) {
+                $(config.preview).innerHTML = `<p class="muted">${escapeHtml(leapValidation.message)} 请先修正闰月选项。</p>`;
+                return;
+            }
             const preview = BaziCore.buildPreview(input);
             const recommendation = preview.solarMeta.autoUseTrueSolar
                 ? "自动模式建议采用真太阳时，因为修正后会影响时柱或日期。"
                 : "自动模式可保持标准时间，因为修正后未跨关键边界。";
             const region = REGIONS[Number($(config.region).value)] || REGIONS[0];
             const regionGroup = getRegionGroup(region);
-            const leapMonth = LunarYear.fromYear(input.year).getLeapMonth();
+            const leapMonth = leapValidation.leapMonth;
             const leapHint = input.calendarType === "lunar"
                 ? (leapMonth
                     ? (leapMonth === input.month
-                        ? `系统已识别该年闰${leapMonth}月。月份下拉里已经拆成“${leapMonth}月”和“闰${leapMonth}月”，当前已自动识别为${input.lunarLeap ? "闰月" : "普通月"}。`
-                        : `系统已识别该年闰${leapMonth}月；你当前选择的不是闰月月份，所以闰月已自动关闭。`)
-                    : "系统已识别该年无闰月，所以闰月已自动关闭。")
-                : "当前为公历录入，不涉及闰月判断。";
+                        ? `系统已识别该年闰${leapMonth}月。你可手动选择“闰月是/否”，系统只按你的选择换算。`
+                        : `系统已识别该年闰${leapMonth}月。你当前选的是${input.month}月，若选“闰月是”会判定为无效录入。`)
+                    : `系统已识别该年无闰月。若你手动选“闰月是”，系统会提示无效。`)
+                : (preview.standardLunar.getMonth() < 0
+                    ? `当前为公历录入，不要求填写闰月。换算农历结果为“闰${Math.abs(preview.standardLunar.getMonth())}月”。`
+                    : "当前为公历录入，不涉及闰月录入判断。");
             const solarExplain = preview.solarMeta.usedMode === "trueSolar"
                 ? "本次已采用真太阳时。真太阳时依据“出生地经度 + 时区中央经线差 + 当天均时差”计算，因为修正后已跨时辰或日期边界。"
                 : "本次排盘仍采用标准时间。真太阳时只有在修正后影响时辰或日期边界时，自动模式才会接管。";
@@ -432,7 +507,43 @@
 
     function handleSubmit(event) {
         event.preventDefault();
-        runAnalysis(getProfileInput(PROFILE_CONFIGS.primary));
+        try {
+            runAnalysis(getProfileInput(PROFILE_CONFIGS.primary));
+        } catch (error) {
+            alert(`排盘失败：${error.message}`);
+        }
+    }
+
+    function buildAllYearEvaluations(chart, dayun) {
+        const birthYear = chart.source.standardSolar.getYear();
+        const rows = [];
+        dayun.list.forEach((dayunEntry) => {
+            DayunEngine.buildLiuNian(dayunEntry).forEach((item) => {
+                const evaluation = BaziAnalysis.evaluateCycle(chart, item.pillar, "流年", `${item.year}年 · ${item.pillar}`, {
+                    year: item.year,
+                    currentDayunLabel: dayunEntry.label,
+                    dayunStartYear: dayunEntry.startYear,
+                    dayunEndYear: dayunEntry.endYear
+                });
+                rows.push({
+                    ...item,
+                    dayunLabel: dayunEntry.label,
+                    dayunStartYear: dayunEntry.startYear,
+                    dayunEndYear: dayunEntry.endYear,
+                    evaluation
+                });
+            });
+        });
+        const uniq = new Map();
+        rows.forEach((item) => {
+            const previous = uniq.get(item.year);
+            if (!previous || item.evaluation.scores.overall > previous.evaluation.scores.overall) {
+                uniq.set(item.year, item);
+            }
+        });
+        return Array.from(uniq.values())
+            .filter((item) => item.year >= birthYear && item.year <= birthYear + 80)
+            .sort((a, b) => a.year - b.year);
     }
 
     function runAnalysis(primaryInput) {
@@ -445,12 +556,24 @@
         const currentMonthEntry = liuyue[focusMonth - 1] || liuyue[0];
         const yearEvaluations = liunian.map((item) => ({
             ...item,
-            evaluation: BaziAnalysis.evaluateCycle(chart, item.pillar, "流年", `${item.year}年 · ${item.pillar}`)
+            evaluation: BaziAnalysis.evaluateCycle(chart, item.pillar, "流年", `${item.year}年 · ${item.pillar}`, {
+                year: item.year,
+                currentDayunLabel: dayun.current.label,
+                dayunStartYear: dayun.current.startYear,
+                dayunEndYear: dayun.current.endYear
+            })
         }));
         const monthEvaluations = liuyue.map((item) => ({
             ...item,
-            evaluation: BaziAnalysis.evaluateCycle(chart, item.pillar, "流月", `${item.month}月 · ${item.pillar}`)
+            evaluation: BaziAnalysis.evaluateCycle(chart, item.pillar, "流月", `${item.month}月 · ${item.pillar}`, {
+                month: item.month,
+                parentYear: currentYearEntry.year,
+                currentDayunLabel: dayun.current.label,
+                dayunStartYear: dayun.current.startYear,
+                dayunEndYear: dayun.current.endYear
+            })
         }));
+        const allYearEvaluations = buildAllYearEvaluations(chart, dayun);
         const currentYearEval = yearEvaluations.find((item) => item.year === currentYearEntry.year).evaluation;
         const currentMonthEval = monthEvaluations.find((item) => item.month === currentMonthEntry.month).evaluation;
         const health = HealthEngine.analyzeHealth(chart);
@@ -458,6 +581,8 @@
         const detailed = BaziAnalysis.buildDetailedAnalysis(chart, currentYearEval);
         const family = BaziAnalysis.buildFamilyAnalysis(chart, currentYearEval);
         const master = BaziAnalysis.buildMasterSummary(chart, currentYearEval, currentMonthEval);
+        const criticalYears = BaziAnalysis.buildCriticalYears(chart, allYearEvaluations);
+        const eventDashboard = BaziAnalysis.buildEventDashboard(chart, allYearEvaluations, monthEvaluations);
         const report = AIEngine.buildReport(chart, dayun, currentYearEval, currentMonthEval, health, primaryInput.targetYear);
         const lucky = AIEngine.buildLuckySuggestions(chart, currentYearEval, currentMonthEval, health);
         let compatibility = null;
@@ -470,6 +595,7 @@
                 result: CompatibilityEngine.buildCompatibility(chart, compatChart)
             };
         }
+        const modern = BaziAnalysis.buildModernLifeAdvice(chart, compatibility?.result || null, primaryInput.targetYear);
         const kbMatches = KnowledgeBaseEngine.matchEntries(chart, currentYearEval, currentMonthEval, compatibility);
         state.current = {
             input: primaryInput,
@@ -477,6 +603,7 @@
             dayun,
             yearEvaluations,
             monthEvaluations,
+            allYearEvaluations,
             currentYearEval,
             currentMonthEval,
             health,
@@ -484,8 +611,14 @@
             detailed,
             family,
             master,
+            modern,
+            criticalYears,
+            eventDashboard,
             compatibility,
             kbMatches,
+            ragMatches: [],
+            llmReport: "",
+            agentReports: {},
             report,
             lucky
         };
@@ -494,20 +627,21 @@
     }
 
     function renderAll() {
-        const { input, chart, dayun, yearEvaluations, monthEvaluations, currentYearEval, currentMonthEval, health, environment, detailed, family, master, compatibility, kbMatches, report, lucky } = state.current;
+        const { input, chart, dayun, yearEvaluations, monthEvaluations, allYearEvaluations, eventDashboard, criticalYears, currentYearEval, currentMonthEval, health, environment, detailed, family, master, modern, compatibility, kbMatches, report, lucky } = state.current;
         $(PROFILE_CONFIGS.primary.targetYear).value = String(input.targetYear);
         $("env-year-label").textContent = input.targetYear;
         $("liuyue-year-label").textContent = input.targetYear;
         renderCalculationMeta(chart, dayun);
         renderPillars(chart);
+        renderInteractiveBranchBoard(chart);
         renderPillarInterpretations(chart);
         renderWuxing(chart);
         renderNarratives(chart);
         renderUsefulAnalysis(chart);
         renderShenshaDetails(chart);
-        renderDayun(dayun, yearEvaluations, monthEvaluations);
+        renderDayun(dayun, yearEvaluations, monthEvaluations, allYearEvaluations, eventDashboard, criticalYears);
         renderHealth(health, yearEvaluations, monthEvaluations);
-        renderAI(report, environment, lucky, detailed, family, master, currentYearEval, currentMonthEval, compatibility, kbMatches);
+        renderAI(report, environment, lucky, modern, detailed, family, master, currentYearEval, currentMonthEval, compatibility, kbMatches);
     }
 
     function renderCalculationMeta(chart, dayun) {
@@ -517,6 +651,14 @@
             longitude: chart.input.longitude,
             timezoneOffset: chart.input.timezoneOffset
         };
+        const commanderText = chart.structure.commanderInfo.weights.map((item) => `${item.stem}${item.element} ${Math.round(item.weight * 100)}%`).join("、");
+        const transformText = [
+            ...chart.transformations.stemCombos.filter((item) => item.success).map((item) => `${item.pair}->${item.element}`),
+            ...chart.transformations.branchCombos.filter((item) => item.success).map((item) => `${item.type}${item.element}`)
+        ].join("；") || "当前无明确合化改气";
+        const blindText = chart.blindPatterns.findings.length
+            ? chart.blindPatterns.findings.slice(0, 2).map((item) => `${item.type} ${item.pair}（${item.focus}）`).join("；")
+            : chart.blindPatterns.summary;
         const cards = [
             { title: "录入历法", body: chart.input.calendarType === "solar" ? "公历录入" : `农历录入${chart.input.lunarLeap ? "（闰月）" : ""}` },
             { title: "出生地与经度", body: `${chart.input.regionName} · 经度 ${chart.input.longitude.toFixed(2)}° · 时区 UTC${chart.input.timezoneOffset >= 0 ? "+" : ""}${chart.input.timezoneOffset}` },
@@ -524,6 +666,10 @@
             { title: "标准排盘时间", body: `${solar.standardText} · ${solar.standardShichen.label}` },
             { title: "真太阳时", body: `${solar.trueSolarText} · ${solar.trueSolarShichen.label} · 修正 ${BaziCore.formatSigned(solar.totalOffsetMinutes)} 分钟` },
             { title: "最终依据", body: `${solar.usedMode === "trueSolar" ? "采用真太阳时" : "采用标准时间"} · 晚子时流派 ${chart.input.dayBoundarySect === 1 ? "子初换日" : "子正换日"}` },
+            { title: "月令与节气", body: `${chart.seasonal.season}令 · ${chart.seasonal.jieQi.prevName}后 ${chart.seasonal.jieQi.passedDays} 天 / ${chart.seasonal.jieQi.nextName}前 ${chart.seasonal.jieQi.remainingDays} 天 · 司令 ${commanderText}` },
+            { title: "格局与根气", body: `${chart.structure.pattern.finalPattern} · 日主${chart.structure.strength}（强弱比 ${chart.structure.strengthScore}） · 日主根气 ${chart.roots.dayMasterRootStrength}` },
+            { title: "合化与改气", body: transformText },
+            { title: "盲派断点", body: blindText },
             { title: "起运设置", body: `起运流派 ${chart.input.yunSect === 2 ? "分钟折算" : "时辰折算"} · 起运日期约 ${dayun.startSolar}` }
         ];
         $("calculation-meta").innerHTML = cards.map((item) => `<div class="mini-card"><h3>${item.title}</h3><p>${item.body}</p></div>`).join("");
@@ -544,6 +690,73 @@
                 <p class="muted">旬空：${pillar.xunKong}</p>
             </div>
         `).join("");
+    }
+
+    function getBranchRelationTargets(baseBranch) {
+        const targets = [];
+        const push = (type, target, text) => {
+            if (!target) return;
+            targets.push({ type, target, text });
+        };
+        push("六合", BaziCore.LIU_HE[baseBranch], "六合：容易配合、吸引、绑定。");
+        push("相冲", BaziCore.CHONG[baseBranch], "相冲：节奏对撞，常见变动、重组。");
+        push("相穿", BaziCore.CHUAN[baseBranch], "相穿（害）：慢性耗损，容易长期拉扯。");
+        push("相破", BaziCore.PO[baseBranch], "相破：合作破局、计划反复。");
+        (BaziCore.XING_PAIRS[baseBranch] || []).forEach((target) => {
+            push("相刑", target, "相刑：反复较劲、流程卡壳、内耗。");
+        });
+        return targets;
+    }
+
+    function relationClass(type) {
+        if (type === "六合") return "is-he";
+        if (type === "相冲") return "is-chong";
+        if (type === "相穿") return "is-chuan";
+        if (type === "相破") return "is-po";
+        if (type === "相刑") return "is-xing";
+        return "";
+    }
+
+    function renderInteractiveBranchBoard(chart) {
+        const board = $("branch-relation-board");
+        const detail = $("branch-relation-detail");
+        if (!board || !detail) return;
+        const natalMap = new Map();
+        chart.pillars.forEach((pillar) => {
+            const labels = natalMap.get(pillar.branch) || [];
+            labels.push(pillar.label.replace("柱", ""));
+            natalMap.set(pillar.branch, labels);
+        });
+        let selected = chart.pillars[2].branch;
+        const draw = () => {
+            const targets = getBranchRelationTargets(selected);
+            const targetMap = new Map(targets.map((item) => [item.target, item]));
+            board.innerHTML = BaziCore.BRANCHES.map((branch) => {
+                const rel = targetMap.get(branch);
+                const classes = ["branch-node"];
+                if (branch === selected) classes.push("is-base");
+                if (rel) classes.push(relationClass(rel.type));
+                const natalLabel = natalMap.get(branch)?.join("/") || "";
+                return `<button type="button" class="${classes.join(" ")}" data-branch-node="${branch}">
+                    <strong>${branch}</strong>${natalLabel ? `<div class="muted">${natalLabel}柱</div>` : `<div class="muted">-</div>`}
+                </button>`;
+            }).join("");
+            const relationLines = targets.map((item) => `<p><span class="marker-chip">${item.type}</span>${selected}${item.target}：${item.text}</p>`).join("");
+            const inChart = chart.pillars
+                .filter((pillar) => pillar.branch === selected)
+                .map((pillar) => pillar.label)
+                .join("、");
+            detail.innerHTML = relationLines
+                ? `<p><strong>${selected}</strong> 当前落在：${inChart || "非原局主支"}。</p>${relationLines}`
+                : `<p><strong>${selected}</strong> 与其它支没有明确六合/冲/穿/破/刑映射，更多看原局十神与大运流年组合。</p>`;
+            board.querySelectorAll("[data-branch-node]").forEach((node) => {
+                node.addEventListener("click", () => {
+                    selected = node.dataset.branchNode;
+                    draw();
+                });
+            });
+        };
+        draw();
     }
 
     function renderPillarInterpretations(chart) {
@@ -585,7 +798,7 @@
         $("shensha-analysis").innerHTML = BaziAnalysis.buildShenshaDetails(chart).map(renderSectionCard).join("");
     }
 
-    function renderDayun(dayun, yearEvaluations, monthEvaluations) {
+    function renderDayun(dayun, yearEvaluations, monthEvaluations, allYearEvaluations, eventDashboard, criticalYears) {
         $("dayun-info").innerHTML = `<p>起运约 ${dayun.startYear} 年 ${dayun.startMonth} 个月 ${dayun.startDay} 天 ${dayun.startHour} 小时后启动，当前处于 <strong>${dayun.current.label}</strong> 大运。</p>`;
         $("dayun-timeline").innerHTML = dayun.list.map((item) => `
             <div class="timeline-item ${item.label === dayun.current.label ? "active" : ""}">
@@ -614,8 +827,84 @@
             </div>
         `).join("")}</div>`;
         ChartRenderer.drawLineChart($("fortune-chart"), yearEvaluations.map((item) => ({ label: item.year, value: item.evaluation.scores.overall })), "#9a3412");
+        renderLifeRoadmap(allYearEvaluations, criticalYears);
+        renderEventDashboard(eventDashboard);
         renderDomainCharts(yearEvaluations, monthEvaluations);
         renderFocusNarratives(yearEvaluations, monthEvaluations);
+    }
+
+    function renderLifeRoadmap(allYearEvaluations, criticalYears) {
+        const canvas = $("life-roadmap-chart");
+        const summary = $("life-roadmap-summary");
+        if (!canvas || !summary) return;
+        const birthYear = state.current.chart.source.standardSolar.getYear();
+        const byYear = new Map((allYearEvaluations || []).map((item) => [item.year, item]));
+        const points = [];
+        for (let age = 0; age <= 80; age++) {
+            const year = birthYear + age;
+            const evalItem = byYear.get(year);
+            points.push({
+                age,
+                year,
+                value: evalItem ? evalItem.evaluation.scores.overall : 60
+            });
+        }
+        const wealthTop = [...(allYearEvaluations || [])].sort((a, b) => b.evaluation.scores.wealth - a.evaluation.scores.wealth).slice(0, 3);
+        const relationTop = [...(allYearEvaluations || [])].sort((a, b) => b.evaluation.scores.relation - a.evaluation.scores.relation).slice(0, 3);
+        const healthRisk = [...(allYearEvaluations || [])].sort((a, b) => a.evaluation.scores.health - b.evaluation.scores.health).slice(0, 3);
+        const markers = [
+            ...wealthTop.map((item) => ({ index: item.year - birthYear, type: "wealth", symbol: "财" })),
+            ...relationTop.map((item) => ({ index: item.year - birthYear, type: "relation", symbol: "缘" })),
+            ...healthRisk.map((item) => ({ index: item.year - birthYear, type: "health", symbol: "警" }))
+        ];
+        ChartRenderer.drawRoadmapChart(canvas, points, markers);
+        const cards = [
+            ...(criticalYears?.favorable || []).slice(0, 4).map((item) => `
+                <div class="mini-card">
+                    <p class="section-kicker">顺势窗口</p>
+                    <h3>${item.year}年 · ${item.pillar}</h3>
+                    <p>${item.reason}</p>
+                    <button type="button" class="btn-link" data-target-year="${item.year}">切换分析年</button>
+                </div>
+            `),
+            ...(criticalYears?.risky || []).slice(0, 4).map((item) => `
+                <div class="mini-card">
+                    <p class="section-kicker">预警窗口</p>
+                    <h3>${item.year}年 · ${item.pillar}</h3>
+                    <p class="bad-text">${item.reason}</p>
+                    <button type="button" class="btn-link" data-target-year="${item.year}">切换分析年</button>
+                </div>
+            `)
+        ];
+        summary.innerHTML = cards.join("") || `<div class="mini-card"><p>当前没有可展示的全生命周期数据。</p></div>`;
+        summary.querySelectorAll("[data-target-year]").forEach((button) => {
+            button.addEventListener("click", () => setTargetYearFromSummary(Number(button.dataset.targetYear)));
+        });
+    }
+
+    function renderEventDashboard(eventDashboard) {
+        const marriageEl = $("dashboard-marriage");
+        const wealthEl = $("dashboard-wealth");
+        const healthEl = $("dashboard-health-traffic");
+        if (!marriageEl || !wealthEl || !healthEl) return;
+        const marriageCards = [
+            ...(eventDashboard?.marriageWindows || []).map((item) => `<div class="mini-card"><p class="section-kicker">正缘窗口</p><h3>${item.year}年</h3><p>${item.note}</p></div>`),
+            ...(eventDashboard?.marriageRisk || []).map((item) => `<div class="mini-card"><p class="section-kicker">桃花/关系风险</p><h3>${item.year}年</h3><p class="bad-text">${item.note}</p></div>`)
+        ];
+        const wealthCards = [
+            ...(eventDashboard?.wealthPeaks || []).map((item) => `<div class="mini-card"><p class="section-kicker">财富高峰</p><h3>${item.year}年</h3><p class="good-text">${item.note}</p></div>`),
+            ...(eventDashboard?.wealthPits || []).map((item) => `<div class="mini-card"><p class="section-kicker">破财填坑</p><h3>${item.year}年</h3><p class="bad-text">${item.note}</p></div>`)
+        ];
+        const healthCards = (eventDashboard?.healthTraffic || []).map((item) => `
+            <div class="mini-card">
+                <h3>${item.month}月 · ${item.level}</h3>
+                <p>${item.pillar}</p>
+                <p class="${item.level === "红灯" ? "bad-text" : item.level === "黄灯" ? "" : "good-text"}">${item.note}</p>
+            </div>
+        `);
+        marriageEl.innerHTML = marriageCards.join("") || `<div class="mini-card"><p>暂无婚姻专题数据。</p></div>`;
+        wealthEl.innerHTML = wealthCards.join("") || `<div class="mini-card"><p>暂无财富专题数据。</p></div>`;
+        healthEl.innerHTML = healthCards.join("") || `<div class="mini-card"><p>暂无健康红绿灯数据。</p></div>`;
     }
 
     function renderDomainCharts(yearEvaluations, monthEvaluations) {
@@ -779,7 +1068,7 @@
     }
 
     function refreshKnowledgeBaseMatches() {
-        const matches = state.current
+        const keywordMatches = state.current
             ? KnowledgeBaseEngine.matchEntries(
                 state.current.chart,
                 state.current.currentYearEval,
@@ -787,13 +1076,32 @@
                 state.current.compatibility
             )
             : [];
-        if (state.current) state.current.kbMatches = matches;
-        renderKnowledgeBase(matches);
+        const ragMatches = state.current?.ragMatches || [];
+        const merged = mergeKnowledgeMatches(keywordMatches, ragMatches);
+        if (state.current) {
+            state.current.kbMatches = keywordMatches;
+        }
+        renderKnowledgeBase(merged);
     }
 
     function removeKnowledgeBaseEntry(id) {
         KnowledgeBaseEngine.removeEntry(id);
         refreshKnowledgeBaseMatches();
+    }
+
+    function mergeKnowledgeMatches(primary, secondary) {
+        const bucket = new Map();
+        const existingIds = new Set(KnowledgeBaseEngine.loadEntries().map((entry) => entry.id));
+        [...(primary || []), ...(secondary || [])].forEach((entry) => {
+            if (!existingIds.has(entry.id)) return;
+            const previous = bucket.get(entry.id);
+            if (!previous || (entry.score || 0) > (previous.score || 0)) {
+                bucket.set(entry.id, entry);
+            }
+        });
+        return Array.from(bucket.values())
+            .sort((a, b) => (b.score || 0) - (a.score || 0))
+            .slice(0, 8);
     }
 
     function renderKnowledgeBase(kbMatches) {
@@ -804,7 +1112,7 @@
                     <p class="section-kicker">关联参考</p>
                     <h3>${escapeHtml(entry.title)}</h3>
                     <p>${escapeHtml(entry.content.slice(0, 180))}${entry.content.length > 180 ? "..." : ""}</p>
-                    <p class="muted">标签：${escapeHtml(entry.tags.join("、") || "未标注")} · 来源：${escapeHtml(entry.source)}</p>
+                    <p class="muted">标签：${escapeHtml(entry.tags.join("、") || "未标注")} · 来源：${escapeHtml(entry.source)}${entry.embeddingModel ? ` · 向量 ${escapeHtml(entry.embeddingModel)}` : ""}</p>
                 </div>
             `).join("")
             : `<div class="mini-card"><h3>暂无高相关条目</h3><p>可以导入你整理过的命理笔记、书目摘要、断语索引或案例库，系统会按当前命盘自动匹配相关内容。</p></div>`;
@@ -823,6 +1131,132 @@
         $("kb-list").querySelectorAll("[data-kb-remove]").forEach((button) => {
             button.addEventListener("click", () => removeKnowledgeBaseEntry(button.dataset.kbRemove));
         });
+    }
+
+    async function refreshLlmModels() {
+        const config = saveAiConfig(getAiConfigFromForm());
+        if (config.provider === "none") {
+            renderLlmStatus("当前仍是“仅本地规则引擎”模式，不会请求远端模型。");
+            return;
+        }
+        try {
+            renderLlmStatus("正在获取模型列表...");
+            const models = await LLMClient.listModels(config);
+            $("llm-model").innerHTML = models.length
+                ? models.map((model) => `<option value="${escapeHtml(model)}"${model === config.model ? " selected" : ""}>${escapeHtml(model)}</option>`).join("")
+                : `<option value="">未获取到模型</option>`;
+            if (!models.includes(config.model)) {
+                $("llm-model").value = models[0] || "";
+            }
+            saveAiConfig(getAiConfigFromForm());
+            renderLlmStatus(models.length ? `已获取 ${models.length} 个模型，请选择后再调用 LLM。` : "没有取到可用模型，请检查 Base URL、Key 或目标服务的 CORS 设置。");
+        } catch (error) {
+            renderLlmStatus(`获取模型失败：${error.message}`);
+        }
+    }
+
+    async function rebuildKnowledgeVectors() {
+        const config = saveAiConfig(getAiConfigFromForm());
+        if (config.provider === "none") {
+            renderLlmStatus("未启用远端模型接口，无法重建向量索引。");
+            return;
+        }
+        if (!config.embeddingModel) {
+            renderLlmStatus("请先填写向量模型，再重建知识库向量索引。");
+            return;
+        }
+        const entries = KnowledgeBaseEngine.loadEntries();
+        renderLlmStatus(`开始重建向量索引，共 ${entries.length} 条。`);
+        try {
+            for (let index = 0; index < entries.length; index++) {
+                const entry = entries[index];
+                const text = `${entry.title}\n${entry.tags.join(" ")}\n${entry.content}`.slice(0, 6000);
+                const embedding = await LLMClient.embed(config, config.embeddingModel, text);
+                KnowledgeBaseEngine.setEntryEmbedding(entry.id, embedding, config.embeddingModel);
+                renderLlmStatus(`正在重建向量索引：${index + 1}/${entries.length} · ${entry.title}`);
+            }
+            renderLlmStatus(`向量索引重建完成，共 ${entries.length} 条，使用模型 ${config.embeddingModel}。`);
+            refreshKnowledgeBaseMatches();
+        } catch (error) {
+            renderLlmStatus(`向量索引重建失败：${error.message}`);
+        }
+    }
+
+    async function getRagReferences(config) {
+        if (!state.current) return [];
+        const keywordMatches = KnowledgeBaseEngine.matchEntries(
+            state.current.chart,
+            state.current.currentYearEval,
+            state.current.currentMonthEval,
+            state.current.compatibility
+        );
+        let ragMatches = [];
+        if (config.embeddingModel && KnowledgeBaseEngine.loadEntries().some((entry) => Array.isArray(entry.embedding) && entry.embedding.length)) {
+            const queryText = AIEngine.buildKnowledgeQueryText(state.current);
+            const queryEmbedding = await LLMClient.embed(config, config.embeddingModel, queryText);
+            ragMatches = KnowledgeBaseEngine.semanticMatchEntries(queryEmbedding, 6);
+        }
+        state.current.ragMatches = ragMatches;
+        const merged = mergeKnowledgeMatches(keywordMatches, ragMatches);
+        state.current.kbMatches = keywordMatches;
+        renderKnowledgeBase(merged);
+        return merged;
+    }
+
+    function renderLlmReport(content, agentReports = {}) {
+        $("llm-report").innerHTML = content
+            ? `<div class="report-block"><h3>LLM 深度报告</h3><p>${escapeHtml(content).replace(/\n/g, "<br>")}</p></div>`
+            : "";
+        const labels = Object.fromEntries((AIEngine.MULTI_AGENT_SEQUENCE || []).map((item) => [item.key, item.title]));
+        $("llm-agent-report").innerHTML = Object.keys(agentReports).length
+            ? Object.entries(agentReports).map(([key, value]) => `
+                <div class="report-block">
+                    <h3>${escapeHtml(labels[key] || key)} 输出</h3>
+                    <p>${escapeHtml(String(value || "")).replace(/\n/g, "<br>")}</p>
+                </div>
+            `).join("")
+            : "";
+    }
+
+    async function generateLlmReport() {
+        const current = ensureReportState();
+        if (!current) return;
+        const config = saveAiConfig(getAiConfigFromForm());
+        if (config.provider === "none") {
+            renderLlmStatus("当前未启用 LLM 接口，仍只使用本地规则引擎。");
+            return;
+        }
+        if (!config.model) {
+            renderLlmStatus("请先获取并选择分析模型。");
+            return;
+        }
+        try {
+            renderLlmStatus("正在准备 RAG 参考与 LLM 请求...");
+            const references = await getRagReferences(config);
+            if (config.workflowMode === "multi") {
+                const outputs = {};
+                for (const agent of AIEngine.MULTI_AGENT_SEQUENCE || []) {
+                    renderLlmStatus(`正在调用 ${agent.title}...`);
+                    const messages = AIEngine.buildAgentPromptMessages(current, config.promptTemplate, references, agent.key, outputs);
+                    const content = await LLMClient.chat(config, config.model, messages, { temperature: agent.key === "master" ? 0.6 : 0.75 });
+                    outputs[agent.key] = content;
+                }
+                current.agentReports = outputs;
+                current.llmReport = outputs.master || outputs[AIEngine.MULTI_AGENT_SEQUENCE[AIEngine.MULTI_AGENT_SEQUENCE.length - 1].key] || "";
+                renderLlmReport(current.llmReport, outputs);
+                renderLlmStatus(`多 Agent 报告生成完成，使用模型 ${config.model}。`);
+            } else {
+                const messages = AIEngine.buildPromptMessages(current, config.promptTemplate, references);
+                const content = await LLMClient.chat(config, config.model, messages, { temperature: 0.7 });
+                current.llmReport = content;
+                current.agentReports = {};
+                renderLlmReport(content, {});
+                renderLlmStatus(`LLM 报告生成完成，使用模型 ${config.model}。`);
+            }
+            showSection("ai-analysis");
+        } catch (error) {
+            renderLlmStatus(`LLM 调用失败：${error.message}`);
+        }
     }
 
     function renderCompatibility(compatibility) {
@@ -850,14 +1284,18 @@
         $("compatibility-analysis").innerHTML = compatibility.result.sections.map(renderSectionCard).join("");
     }
 
-    function renderAI(report, environment, lucky, detailed, family, master, currentYearEval, currentMonthEval, compatibility, kbMatches) {
+    function renderAI(report, environment, lucky, modern, detailed, family, master, currentYearEval, currentMonthEval, compatibility, kbMatches) {
         const loading = $("ai-loading");
         loading.classList.remove("hidden");
         setTimeout(() => {
             loading.classList.add("hidden");
+            renderLlmReport(state.current.llmReport || "", state.current.agentReports || {});
             $("ai-report").innerHTML = report.map((item) => `<div class="report-block"><h3>${item.title}</h3><p>${item.body}</p></div>`).join("");
             $("environment-analysis").innerHTML = `<div class="report-block"><h3>${environment.title}</h3><p>${environment.body}</p><p class="good-text">这一年可能发生：${currentYearEval.opportunities.join(" ")}</p><p class="bad-text">需要注意：${currentYearEval.risks.join(" ")}</p></div>`;
             $("lucky-suggestions").innerHTML = lucky.map((item) => `<div class="report-block"><p>${item}</p></div>`).join("");
+            if (modern?.length) {
+                $("lucky-suggestions").innerHTML += modern.map(renderSectionCard).join("");
+            }
             if (kbMatches?.length) {
                 $("lucky-suggestions").innerHTML += `<div class="report-block"><h3>知识库校注</h3><p>本地知识库匹配到：${kbMatches.slice(0, 3).map((entry) => `${entry.title}（${entry.source}）`).join("；")}。这些条目已在下方“本地知识库”中展开，便于对照经典笔记和案例索引进一步细看。</p></div>`;
             }
@@ -867,8 +1305,8 @@
             ].join("");
             $("master-summary").innerHTML = master.map(renderSectionCard).join("");
             $("family-analysis-grid").innerHTML = family.map(renderSectionCard).join("");
-            renderKeyYearsSummary(state.current.yearEvaluations);
-            renderKnowledgeBase(kbMatches);
+            renderKeyYearsSummary(state.current.allYearEvaluations || state.current.yearEvaluations);
+            renderKnowledgeBase(mergeKnowledgeMatches(kbMatches, state.current.ragMatches || []));
             renderCompatibility(compatibility);
         }, 180);
     }
@@ -890,6 +1328,7 @@
         const pillarInterpretations = BaziAnalysis.buildPillarInterpretations(current.chart);
         const useful = BaziAnalysis.buildUsefulAnalysis(current.chart);
         const shensha = BaziAnalysis.buildShenshaDetails(current.chart);
+        const allYears = current.allYearEvaluations || current.yearEvaluations;
         const lines = [
             `# 天命本地报告：${current.input.profileName}`,
             "",
@@ -897,6 +1336,8 @@
             `- 出生信息：${current.input.year}-${pad(current.input.month)}-${pad(current.input.day)} ${pad(current.input.hour)}:${pad(current.input.minute)} · ${current.input.regionName}`,
             `- 录入历法：${current.input.calendarType === "solar" ? "公历" : `农历${current.input.lunarLeap ? "（闰月）" : ""}`}`,
             `- 最终排盘：${current.chart.solarMeta.usedMode === "trueSolar" ? "真太阳时" : "标准时间"} · ${current.chart.solarMeta.effectiveText}`,
+            `- 月令司令：${current.chart.structure.commanderInfo.weights.map((item) => `${item.stem}${item.element} ${Math.round(item.weight * 100)}%`).join("、")}`,
+            `- 格局：${current.chart.structure.pattern.finalPattern} · 用神 ${current.chart.structure.usefulElement} · 辅助 ${current.chart.structure.supportiveElement}`,
             `- 当前大运：${current.dayun.current.label}（${current.dayun.current.startYear}-${current.dayun.current.endYear}）`,
             "",
             "## 八字四柱",
@@ -924,6 +1365,9 @@
             "## 专题分析",
             ...current.detailed.map(buildSectionMarkdown),
             "",
+            "## 现代生活应用",
+            ...(current.modern || []).map(buildSectionMarkdown),
+            "",
             "## 六亲与子嗣",
             ...current.family.map(buildSectionMarkdown),
             "",
@@ -931,16 +1375,19 @@
             ...current.master.map(buildSectionMarkdown),
             "",
             "## 关键年份",
-            ...current.yearEvaluations
+            ...allYears
                 .slice()
                 .sort((a, b) => b.evaluation.scores.overall - a.evaluation.scores.overall)
                 .slice(0, 5)
                 .map((item) => `- ${item.year}年 ${item.pillar}：综合 ${item.evaluation.scores.overall}；机会 ${joinItems(item.evaluation.opportunities)}；风险 ${joinItems(item.evaluation.risks)}`),
-            ...current.yearEvaluations
+            ...allYears
                 .slice()
                 .sort((a, b) => a.evaluation.scores.overall - b.evaluation.scores.overall)
                 .slice(0, 3)
                 .map((item) => `- 高压提醒 ${item.year}年 ${item.pillar}：综合 ${item.evaluation.scores.overall}；先防 ${joinItems(item.evaluation.risks)}`),
+            ...(current.criticalYears?.risky?.length
+                ? ["", "## 应期触发（重点预警）", ...current.criticalYears.risky.slice(0, 6).map((item) => `- ${item.year}年 ${item.pillar}：${item.reason}（焦点：${item.focus}）`)]
+                : []),
             "",
             "## 健康重点",
             ...current.health.risks.length
@@ -952,6 +1399,15 @@
         }
         if (current.kbMatches?.length) {
             lines.push("", "## 本地知识库关联参考", ...current.kbMatches.map((entry) => `- ${entry.title}（${entry.source}）：${entry.content.slice(0, 160)}`));
+        }
+        if (current.llmReport) {
+            lines.push("", "## LLM 深度报告", current.llmReport);
+        }
+        if (current.agentReports && Object.keys(current.agentReports).length) {
+            lines.push("", "## 多 Agent 输出");
+            Object.entries(current.agentReports).forEach(([key, value]) => {
+                lines.push(`### ${key}`, String(value || ""));
+            });
         }
         return `${lines.join("\n")}\n`;
     }
@@ -1190,5 +1646,4 @@
     renderKnowledgeBase([]);
     updatePreview(PROFILE_CONFIGS.primary);
     updatePreview(PROFILE_CONFIGS.compat);
-    loadExample();
 })();
