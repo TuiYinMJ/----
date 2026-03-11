@@ -186,16 +186,21 @@ label {
     color: var(--muted);
 }
 
-input, select, button {
+input, select, textarea, button {
     font: inherit;
 }
 
-input, select {
+input, select, textarea {
     padding: 12px 14px;
     border: 1px solid rgba(89, 58, 28, 0.14);
     border-radius: 14px;
     background: rgba(255, 255, 255, 0.78);
     color: var(--text);
+}
+
+textarea {
+    width: 100%;
+    resize: vertical;
 }
 
 .preview-panel {
@@ -239,6 +244,8 @@ input, select {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
 }
 
 .saved-profiles {
@@ -374,6 +381,38 @@ input, select {
 
 .report-block p:last-child, .mini-card p:last-child {
     margin-bottom: 0;
+}
+
+.switch-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text);
+}
+
+.switch-row input {
+    width: 18px;
+    height: 18px;
+}
+
+.section-kicker {
+    margin: 0 0 8px;
+    color: var(--brand);
+    font-size: 0.82rem;
+    letter-spacing: 0.04em;
+}
+
+.blunt {
+    color: var(--text);
+    font-weight: 700;
+}
+
+.good-text {
+    color: var(--good);
+}
+
+.bad-text {
+    color: var(--bad);
 }
 
 .ai-loading.hidden { display: none; }

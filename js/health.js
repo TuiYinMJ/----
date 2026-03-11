@@ -32,8 +32,29 @@
         };
     }
 
+    function describeCycleHealth(chart, evaluation, pillarText, scope) {
+        const weakElements = Object.entries(chart.wuxing).sort((a, b) => a[1] - b[1]).map(([element]) => element);
+        const cycleElements = [
+            BaziCore.STEM_WUXING[BaziCore.STEMS.indexOf(pillarText[0])],
+            BaziCore.BRANCH_WUXING[BaziCore.BRANCHES.indexOf(pillarText[1])]
+        ];
+        const watchElements = [...new Set([...cycleElements, weakElements[0], weakElements[1]])].slice(0, 3);
+        const likely = watchElements.map((element) => {
+            const info = HEALTH_MAP[element];
+            return `${element}系要重点防 ${info.risk}，对应部位是${info.organs.join("、")}`;
+        });
+        const summary = evaluation.scores.health <= 58
+            ? `${scope}健康面压力偏大，这不是只靠忍就能扛过去的阶段。`
+            : evaluation.scores.health >= 72
+                ? `${scope}恢复力相对较好，但状态好时也容易过度透支。`
+                : `${scope}健康面中等，没有大坑，但很怕作息被你自己打乱。`;
+        const advice = watchElements.map((element) => HEALTH_MAP[element].advice);
+        return { summary, likely, advice };
+    }
+
     window.HealthEngine = {
         analyzeHealth,
-        HEALTH_MAP
+        HEALTH_MAP,
+        describeCycleHealth
     };
 })();

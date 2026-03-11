@@ -4,6 +4,25 @@
     const STEM_WUXING = ["木", "木", "火", "火", "土", "土", "金", "金", "水", "水"];
     const BRANCH_WUXING = ["水", "土", "木", "木", "土", "火", "火", "土", "金", "金", "土", "水"];
     const ELEMENT_COLOR = { 木: "#3f6212", 火: "#b91c1c", 土: "#a16207", 金: "#475569", 水: "#0f766e" };
+    const LIU_HE = { 子: "丑", 丑: "子", 寅: "亥", 亥: "寅", 卯: "戌", 戌: "卯", 辰: "酉", 酉: "辰", 巳: "申", 申: "巳", 午: "未", 未: "午" };
+    const CHONG = { 子: "午", 午: "子", 丑: "未", 未: "丑", 寅: "申", 申: "寅", 卯: "酉", 酉: "卯", 辰: "戌", 戌: "辰", 巳: "亥", 亥: "巳" };
+    const HAI = { 子: "未", 未: "子", 丑: "午", 午: "丑", 寅: "巳", 巳: "寅", 卯: "辰", 辰: "卯", 申: "亥", 亥: "申", 酉: "戌", 戌: "酉" };
+    const XING_PAIRS = {
+        子: ["卯"], 卯: ["子"], 寅: ["巳", "申"], 巳: ["寅", "申"], 申: ["寅", "巳"],
+        丑: ["戌", "未"], 戌: ["丑", "未"], 未: ["丑", "戌"], 辰: ["辰"], 午: ["午"], 酉: ["酉"], 亥: ["亥"]
+    };
+    const SAN_HE = [
+        { branches: ["申", "子", "辰"], element: "水" },
+        { branches: ["亥", "卯", "未"], element: "木" },
+        { branches: ["寅", "午", "戌"], element: "火" },
+        { branches: ["巳", "酉", "丑"], element: "金" }
+    ];
+    const SAN_HUI = [
+        { branches: ["亥", "子", "丑"], element: "水" },
+        { branches: ["寅", "卯", "辰"], element: "木" },
+        { branches: ["巳", "午", "未"], element: "火" },
+        { branches: ["申", "酉", "戌"], element: "金" }
+    ];
     const SHICHEN_RANGES = [
         { branch: "子", label: "子时", start: "23:00", end: "00:59" },
         { branch: "丑", label: "丑时", start: "01:00", end: "02:59" },
@@ -69,6 +88,45 @@
         const minute = solar.getMinute();
         const index = LunarUtil.getTimeZhiIndex(`${pad(hour)}:${pad(minute)}`);
         return { index, ...SHICHEN_RANGES[index] };
+    }
+
+    function getBranchRelation(a, b) {
+        if (a === b && ["辰", "午", "酉", "亥"].includes(a)) return { type: "自刑", text: "同支自刑，容易在同一类问题上反复内耗。" };
+        if (a === b) return { type: "同支", text: "同支，主题会被重复放大。" };
+        if (LIU_HE[a] === b) return { type: "六合", text: "六合，事情有黏合、配合或吸引的一面。" };
+        if (CHONG[a] === b) return { type: "相冲", text: "相冲，节奏和立场容易对撞，变化也会更大。" };
+        if (HAI[a] === b) return { type: "相害", text: "相害，不一定硬碰硬，但容易暗耗和误解。" };
+        if ((XING_PAIRS[a] || []).includes(b)) return { type: "相刑", text: "相刑，容易较劲、纠结、压迫或反复折腾。" };
+        return null;
+    }
+
+    function analyzeBranchMatrix(pillars) {
+        const relations = [];
+        for (let i = 0; i < pillars.length; i++) {
+            for (let j = i + 1; j < pillars.length; j++) {
+                const relation = getBranchRelation(pillars[i].branch, pillars[j].branch);
+                if (relation) {
+                    relations.push({
+                        from: pillars[i].label,
+                        to: pillars[j].label,
+                        branches: `${pillars[i].branch}-${pillars[j].branch}`,
+                        ...relation
+                    });
+                }
+            }
+        }
+        const branchList = pillars.map((pillar) => pillar.branch);
+        SAN_HE.forEach((group) => {
+            if (group.branches.every((branch) => branchList.includes(branch))) {
+                relations.push({ type: "三合", element: group.element, branches: group.branches.join(""), text: `三合${group.element}局，相关主题会明显加强。` });
+            }
+        });
+        SAN_HUI.forEach((group) => {
+            if (group.branches.every((branch) => branchList.includes(branch))) {
+                relations.push({ type: "三会", element: group.element, branches: group.branches.join(""), text: `三会${group.element}局，环境气势更重，更看整体取向。` });
+            }
+        });
+        return relations;
     }
 
     function buildSolarTimeMeta(input, standardSolar) {
@@ -229,6 +287,7 @@
             wuxing,
             structure,
             shensha: getShensha(pillars),
+            branchRelations: analyzeBranchMatrix(pillars),
             solarMeta: preview.solarMeta,
             source: {
                 standardSolar: preview.standardSolar,
@@ -263,11 +322,19 @@
         BRANCH_WUXING,
         ELEMENT_COLOR,
         SHICHEN_RANGES,
+        LIU_HE,
+        CHONG,
+        HAI,
+        XING_PAIRS,
+        SAN_HE,
+        SAN_HUI,
         buildPreview,
         computeBaZi,
         equationOfTimeMinutes,
         getSolarFromInput,
         getShichenInfo,
+        getBranchRelation,
+        analyzeBranchMatrix,
         generateElement,
         leakElement,
         controlElement,

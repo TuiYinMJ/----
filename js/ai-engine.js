@@ -1,29 +1,31 @@
 (function () {
+    function joinList(list) {
+        return list && list.length ? list.join("；") : "暂无明显特别项。";
+    }
+
     function buildReport(chart, dayun, currentYearEval, currentMonthEval, health, targetYear) {
-        const yearHighlights = currentYearEval.highlights.join("；");
-        const monthHighlights = currentMonthEval.highlights.join("；");
         return [
             {
-                title: "命局总览",
-                body: `${chart.pillars[2].stem}${chart.pillars[2].branch}日主，${chart.structure.strength}，命局旺点在${chart.structure.maxElement}，弱点在${chart.structure.minElement}。从平衡角度看，用神偏向${chart.structure.usefulElement}，辅助五行为${chart.structure.supportiveElement}。`
+                title: "先说结论",
+                body: `${chart.pillars[2].stem}${chart.pillars[2].branch}日主，${chart.structure.strength}。你不是单纯运气好或不好，而是命局有明确长板也有明确短板。当前处于${dayun.current.label}大运（${dayun.current.startYear}-${dayun.current.endYear}），整体属于“${currentYearEval.blunt}”的年份。`
             },
             {
-                title: "当前阶段",
-                body: `当前处于${dayun.current.label}大运（${dayun.current.startYear}-${dayun.current.endYear}），起运日期约为${dayun.startSolar}。${targetYear} 年更适合围绕“节奏、资源、关系、身体恢复”四条线同时管理。`
+                title: "这一年的好处",
+                body: `有利面：${joinList(currentYearEval.opportunities)}`
             },
             {
-                title: "年度提示",
-                body: `${targetYear} 年对应 ${currentYearEval.label}，综合分 ${currentYearEval.scores.overall}。重点提示：${yearHighlights}`
+                title: "这一年的风险",
+                body: `不利面：${joinList(currentYearEval.risks)}`
             },
             {
-                title: "月度提示",
-                body: `当前参考月对应 ${currentMonthEval.label}，综合分 ${currentMonthEval.scores.overall}。重点提示：${monthHighlights}`
+                title: "这个月最该防什么",
+                body: `${currentMonthEval.blunt} 可能发生：${joinList(currentMonthEval.opportunities)} 需要注意：${joinList(currentMonthEval.risks)}`
             },
             {
                 title: "健康与执行",
                 body: health.risks.length
-                    ? `当前命理健康侧重点在${health.risks.slice(0, 2).map((item) => item.element).join("、")}，建议先稳住睡眠、饮食、情绪和运动恢复，再谈高强度突破。`
-                    : "五行分布相对均衡，健康重心在长期习惯管理，避免阶段性透支。"
+                    ? `健康侧重点落在${health.risks.slice(0, 2).map((item) => item.element).join("、")}。白话说，状态一掉，你最容易先从作息、情绪、消化或恢复力上出问题。`
+                    : "健康盘面不算失衡，但这不等于可以透支。长期习惯决定上限。"
             }
         ];
     }
@@ -31,10 +33,10 @@
     function buildLuckySuggestions(chart, currentYearEval, currentMonthEval, health) {
         const colorMap = { 木: "青绿", 火: "暖红", 土: "米黄", 金: "白金", 水: "深蓝" };
         return [
-            `外部环境可优先引入${chart.structure.usefulElement}属性，例如使用${colorMap[chart.structure.usefulElement]}、安排对应季节活动或空间布局。`,
-            `年度重点放在分数最低的维度补短板：今年依次是事业 ${currentYearEval.scores.career}、财运 ${currentYearEval.scores.wealth}、感情 ${currentYearEval.scores.relation}、家庭 ${currentYearEval.scores.family}、健康 ${currentYearEval.scores.health}。`,
-            `本月建议围绕“${currentMonthEval.highlights[0] || "稳节奏"}”执行，避免一边透支身体一边追求高强度结果。`,
-            health.suggestions[0] || "先把睡眠和恢复节律稳住，再谈开运。"
+            `补偏重点放在${chart.structure.usefulElement}，可以从环境、作息、工作节奏和长期习惯入手，而不是只靠摆件和口号。`,
+            `年度最先要守住的是：${joinList(currentYearEval.risks)}。先堵漏，再谈放大机会。`,
+            `本月能争取的点：${joinList(currentMonthEval.opportunities)}。但不要为了抓机会把身体和关系一起透支。`,
+            health.suggestions[0] || `外部环境可适当用${colorMap[chart.structure.usefulElement]}系调节氛围，但真正有效的还是稳定作息。`
         ];
     }
 

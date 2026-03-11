@@ -169,6 +169,106 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="card">
+                    <div class="saved-head">
+                        <h2>合盘对象录入</h2>
+                        <label class="switch-row" for="compat-enabled">
+                            <input id="compat-enabled" type="checkbox">
+                            <span>启用合盘 / 合婚分析</span>
+                        </label>
+                    </div>
+                    <form id="compat-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="compat-name">对象名称</label>
+                                <input id="compat-name" type="text" placeholder="例如：伴侣 / 对方 / 合作对象">
+                            </div>
+                            <div class="form-group">
+                                <label for="compat-calendar-type">录入历法</label>
+                                <select id="compat-calendar-type">
+                                    <option value="solar" selected>公历</option>
+                                    <option value="lunar">农历</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="compat-year">出生年份</label>
+                                <select id="compat-year"></select>
+                            </div>
+                            <div class="form-group">
+                                <label for="compat-month">出生月份</label>
+                                <select id="compat-month"></select>
+                            </div>
+                            <div class="form-group">
+                                <label for="compat-day">出生日期</label>
+                                <select id="compat-day"></select>
+                            </div>
+                            <div class="form-group">
+                                <label for="compat-lunar-leap">闰月</label>
+                                <select id="compat-lunar-leap">
+                                    <option value="0" selected>否</option>
+                                    <option value="1">是</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="compat-time">出生时间</label>
+                                <input id="compat-time" type="time" value="20:15">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="compat-region">常用出生地</label>
+                                <select id="compat-region"></select>
+                            </div>
+                            <div class="form-group">
+                                <label for="compat-longitude">经度（东正西负）</label>
+                                <input id="compat-longitude" type="number" step="0.01" min="-180" max="180" value="121.47">
+                            </div>
+                            <div class="form-group">
+                                <label for="compat-solar-time-mode">时刻采用方式</label>
+                                <select id="compat-solar-time-mode">
+                                    <option value="auto">自动判断</option>
+                                    <option value="standard">标准时间</option>
+                                    <option value="trueSolar">真太阳时</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="compat-day-boundary-sect">日柱换日流派</label>
+                                <select id="compat-day-boundary-sect">
+                                    <option value="1" selected>子初换日</option>
+                                    <option value="2">子正换日</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="compat-gender">性别</label>
+                                <select id="compat-gender">
+                                    <option value="male">男</option>
+                                    <option value="female">女</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="compat-timezone-offset">时区</label>
+                                <select id="compat-timezone-offset">
+                                    <option value="8" selected>UTC+8</option>
+                                    <option value="9">UTC+9</option>
+                                    <option value="7">UTC+7</option>
+                                    <option value="0">UTC+0</option>
+                                    <option value="-5">UTC-5</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group form-group-wide-xl">
+                                <label>合盘对象时间预览</label>
+                                <div id="compat-preview" class="preview-panel"></div>
+                            </div>
+                            <div class="form-group">
+                                <label>&nbsp;</label>
+                                <button type="button" class="btn btn-secondary" id="btn-compat-example">载入合盘示例</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
             </section>
 
             <section id="section-bazi" class="section">
@@ -189,6 +289,11 @@
                     </div>
                 </div>
 
+                <div class="card">
+                    <h2>四柱详解</h2>
+                    <div id="pillar-interpretations" class="pair-grid"></div>
+                </div>
+
                 <div class="grid-2">
                     <div class="card">
                         <h2>十神分析</h2>
@@ -201,8 +306,13 @@
                 </div>
 
                 <div class="card">
-                    <h2>神煞与结构提示</h2>
-                    <div id="shensha-analysis" class="chip-grid"></div>
+                    <h2>用神与宜忌</h2>
+                    <div id="useful-analysis" class="pair-grid"></div>
+                </div>
+
+                <div class="card">
+                    <h2>神煞与结构白话</h2>
+                    <div id="shensha-analysis" class="pair-grid"></div>
                 </div>
             </section>
 
@@ -236,6 +346,16 @@
                     <canvas id="month-domain-chart" width="1200" height="340"></canvas>
                     <div id="month-events" class="pair-grid"></div>
                 </div>
+                <div class="grid-2">
+                    <div class="card">
+                        <h2>当前流年重点解析</h2>
+                        <div id="current-year-focus"></div>
+                    </div>
+                    <div class="card">
+                        <h2>当前流月重点解析</h2>
+                        <div id="current-month-focus"></div>
+                    </div>
+                </div>
             </section>
 
             <section id="section-health" class="section">
@@ -259,11 +379,28 @@
                         <div id="health-suggestions"></div>
                     </div>
                 </div>
+                <div class="grid-2">
+                    <div class="card">
+                        <h2>年度健康曲线</h2>
+                        <canvas id="year-health-chart" width="1200" height="320"></canvas>
+                        <div id="year-health-notes" class="pair-grid"></div>
+                    </div>
+                    <div class="card">
+                        <h2>月度健康曲线</h2>
+                        <canvas id="month-health-chart" width="1200" height="320"></canvas>
+                        <div id="month-health-notes" class="pair-grid"></div>
+                    </div>
+                </div>
             </section>
 
             <section id="section-ai-analysis" class="section">
                 <div class="card">
                     <h2>AI综合命理分析报告</h2>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary" id="btn-export-markdown">导出 Markdown 报告</button>
+                        <button type="button" class="btn btn-secondary" id="btn-export-html">导出 HTML 报告</button>
+                        <button type="button" class="btn btn-secondary" id="btn-print-report">打印 / 保存 PDF</button>
+                    </div>
                     <div id="ai-loading" class="ai-loading hidden">
                         <div class="loading-spinner"></div>
                         <p>本地分析引擎正在组织报告...</p>
@@ -284,6 +421,51 @@
                     <h2>专题分析</h2>
                     <div id="detailed-analysis-grid" class="pair-grid"></div>
                 </div>
+                <div class="card">
+                    <h2>道长总断</h2>
+                    <div id="master-summary" class="pair-grid"></div>
+                </div>
+                <div class="card">
+                    <h2>断语总览与关键年份</h2>
+                    <div id="key-years-summary" class="pair-grid"></div>
+                </div>
+                <div class="card">
+                    <h2>六亲与子嗣</h2>
+                    <div id="family-analysis-grid" class="pair-grid"></div>
+                </div>
+                <div class="card">
+                    <h2>合盘 / 合婚</h2>
+                    <canvas id="compatibility-chart" width="1200" height="320"></canvas>
+                    <div id="compatibility-analysis" class="pair-grid"></div>
+                </div>
+                <div class="card">
+                    <h2>本地知识库</h2>
+                    <p class="muted">可导入你自己的命理笔记、摘要、书目索引或整理后的条目。系统会在分析时提取相关参考，不上传到网络。</p>
+                    <div class="form-actions">
+                        <input id="kb-file-input" type="file" accept=".txt,.md,.json" multiple>
+                        <button type="button" class="btn btn-secondary" id="btn-kb-export">导出知识库</button>
+                        <button type="button" class="btn btn-secondary" id="btn-kb-seed">恢复内置书目</button>
+                    </div>
+                    <div class="pair-grid">
+                        <div class="form-group">
+                            <label for="kb-manual-title">手动新增标题</label>
+                            <input id="kb-manual-title" type="text" placeholder="例如：滴天髓用神笔记">
+                        </div>
+                        <div class="form-group">
+                            <label for="kb-manual-tags">标签</label>
+                            <input id="kb-manual-tags" type="text" placeholder="例如：用神,伤官,合婚">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="kb-manual-content">手动新增内容</label>
+                        <textarea id="kb-manual-content" rows="6" placeholder="粘贴你整理过的断语、笔记、书目摘要或索引。"></textarea>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary" id="btn-kb-add">加入知识库</button>
+                    </div>
+                    <div id="kb-matches" class="pair-grid"></div>
+                    <div id="kb-list" class="pair-grid"></div>
+                </div>
             </section>
         </main>
 
@@ -295,9 +477,11 @@
     <script src="js/vendor/lunar.js"></script>
     <script src="js/bazi-core.js"></script>
     <script src="js/bazi-analysis.js"></script>
+    <script src="js/compatibility.js"></script>
     <script src="js/dayun.js"></script>
     <script src="js/health.js"></script>
     <script src="js/ai-engine.js"></script>
+    <script src="js/knowledge-base.js"></script>
     <script src="js/charts.js"></script>
     <script src="js/app.js"></script>
 </body>
